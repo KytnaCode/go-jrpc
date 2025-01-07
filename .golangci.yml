@@ -1,0 +1,17 @@
+linters:
+  disable:
+    - depguard
+  enable:
+    - dupword
+  presets:
+    - bugs
+    - test
+    - error
+    - style
+    - format
+    - import
+    - module
+    - unused
+    - complexity
+    - metalinter
+    - performance
