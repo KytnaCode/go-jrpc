@@ -32,7 +32,7 @@ func (s *Server) ServeListener(ctx context.Context, listener net.Listener) error
 				return fmt.Errorf("could not listen for connections: %w", err)
 			}
 
-			s.dispatcher.Dispatch(ctx, conn) // Handle connection.
+			go s.dispatcher.Dispatch(ctx, conn) // Handle connection.
 		}
 	}
 }
