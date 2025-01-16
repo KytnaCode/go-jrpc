@@ -101,7 +101,7 @@ func parseMessages(raw json.RawMessage) ([]Message, bool, error) {
 
 	// readBracket check if raw is a batch, if it is then read the array bracket.
 	readBracket := func() ([]Message, error) {
-		if isBatch(raw) {
+		if isArray(raw) {
 			if _, err := dec.Token(); errors.Is(err, io.EOF) {
 				return []Message{}, nil // If is an empty list.
 			} else if err != nil {
@@ -131,20 +131,5 @@ func parseMessages(raw json.RawMessage) ([]Message, bool, error) {
 		return emptyMsgs, true, err
 	}
 
-	return msgs, isBatch(raw), nil
-}
-
-// isBatch check if raw is a json array.
-func isBatch(raw json.RawMessage) bool {
-	for _, char := range raw {
-		// Insignificant whitespace
-		// Space || Horizontal tab || New line || Carriage return
-		if char == 0x20 || char == 0x09 || char == 0x0a || char == 0x0d {
-			continue
-		}
-
-		return char == '['
-	}
-
-	return false
+	return msgs, isArray(raw), nil
 }
