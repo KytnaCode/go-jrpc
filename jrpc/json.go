@@ -15,6 +15,18 @@ func isArray(raw json.RawMessage) bool {
 	return false
 }
 
+func isObject(raw json.RawMessage) bool {
+	for _, char := range raw {
+		if isWhitespace(char) {
+			continue
+		}
+
+		return char == '{'
+	}
+
+	return false
+}
+
 // isWhitespace check if a character is an insignificant whitespace (RFC 8259).
 func isWhitespace(char byte) bool {
 	// Space || Horizontal tab || New line || Carriage return
