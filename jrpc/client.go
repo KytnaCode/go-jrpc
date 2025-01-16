@@ -11,12 +11,6 @@ import (
 	"net"
 )
 
-const (
-	ParseError       = -32700
-	InternalError    = -32603
-	UnsupportedError = -32001 // Feature not implemented yet.
-)
-
 // ClientDispatcher handles client connections parsing their requests and dispatching messages
 // and batch requests to their correct callback.
 type ClientDispatcher interface {
