@@ -58,7 +58,7 @@ func (mr *MockRegistry) GetByName(method string) (jrpc.Callback, reflect.Type, b
 	}, reflect.TypeFor[ArgsType](), true
 }
 
-func NewHandler(t *testing.T) jrpc.DefaultHandler {
+func NewHandler(t *testing.T) *jrpc.DefaultHandler {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
