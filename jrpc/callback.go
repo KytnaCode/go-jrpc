@@ -227,6 +227,10 @@ func parsePositionalParams(raw json.RawMessage, argsType reflect.Type) ([]reflec
 	args := reflect.New(argsType) // Create the arguments struct.
 
 	for fieldIndex := range argsType.NumField() {
+		if !argsType.Field(fieldIndex).IsExported() {
+			continue
+		}
+
 		if !dec.More() { // If there is not more arguments.
 			return nil, InvalidParametersError{cause: "not enough parameters to call procedure"}
 		}
@@ -263,22 +267,19 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 		return nil, ParametersParseError{err: err}
 	}
 
-	// Check if there's the correct amount of parameters.
-	if len(params) != argsType.NumField() {
-		return nil, InvalidParametersError{
-			cause: fmt.Sprintf(
-				"expected exactly %v parameters: got %v",
-				argsType.NumField(),
-				len(params),
-			),
-		}
-	}
-
 	// Create args struct.
 	args := reflect.New(argsType)
 
+	exportedFields := 0
+
 	// Check if all parameters are present.
 	for fieldIndex := range argsType.NumField() {
+		if !argsType.Field(fieldIndex).IsExported() {
+			continue
+		}
+
+		exportedFields++
+
 		value, ok := params[argsType.Field(fieldIndex).Name]
 		if !ok {
 			return nil, InvalidParametersError{
@@ -296,6 +297,12 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 		}
 
 		args.Elem().Field(fieldIndex).Set(param)
+	}
+
+	if len(params) != exportedFields {
+		return nil, InvalidParametersError{
+			cause: fmt.Sprintf("expected exactly %v parameters: got %v", exportedFields, len(params)),
+		}
 	}
 
 	return []reflect.Value{args.Elem()}, nil

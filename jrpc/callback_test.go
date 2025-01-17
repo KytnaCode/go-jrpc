@@ -18,9 +18,15 @@ type ArgsType struct {
 	MySecondField *int
 }
 
+type UnexportedFieldsArgs struct {
+	MyExportedField   *int
+	myUnexportedField *string //nolint:unused
+}
+
 const (
-	failMethod       = "fail"
-	userDefinedError = 1
+	failMethod             = "fail"
+	unexportedParamsMethod = "unexported"
+	userDefinedError       = 1
 )
 
 func (mr *MockRegistry) GetByName(method string) (jrpc.Callback, reflect.Type, bool) {
@@ -28,6 +34,14 @@ func (mr *MockRegistry) GetByName(method string) (jrpc.Callback, reflect.Type, b
 		return func(params []reflect.Value) (any, *jrpc.ProcedureError) {
 			return nil, jrpc.NewError(userDefinedError, "user defined error", nil)
 		}, reflect.TypeFor[ArgsType](), true
+	}
+
+	if method == unexportedParamsMethod {
+		return func(params []reflect.Value) (any, *jrpc.ProcedureError) {
+			args := params[0].Interface().(UnexportedFieldsArgs) //nolint:forcetypeassert
+
+			return *args.MyExportedField * 2, nil
+		}, reflect.TypeFor[UnexportedFieldsArgs](), true
 	}
 
 	return func(params []reflect.Value) (any, *jrpc.ProcedureError) {
@@ -406,5 +420,55 @@ func TestDefaultHandler_HandleMsgShouldReturnUserDefinedErrors(t *testing.T) {
 
 	if resp.Error == nil || resp.Error.Code != userDefinedError {
 		t.Errorf("handler should return user defined error: got %v", resp.Error)
+	}
+}
+
+func TestDefaultHandler_HandleMsgShouldIgnoreUnexportedNamedFields(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(t)
+
+	params := struct{ MyExportedField int }{MyExportedField: 4}
+
+	paramsJSON, err := json.Marshal(params) //nolint:musttag
+	if err != nil {
+		t.Errorf("could not marshal parameters: %v", err)
+	}
+
+	//nolint:exhaustruct
+	resp := handler.HandleMsg(context.Background(), jrpc.Message{
+		JSONRPC: jsonrpc,
+		ID:      new(int),
+		Method:  unexportedParamsMethod,
+		Params:  paramsJSON,
+	})
+
+	if resp.Error != nil {
+		t.Errorf("handler must ignore unexported parameters: %v", resp.Error)
+	}
+}
+
+func TestDefaultHandler_HandleMsgShouldIgnoreUnexportedPositionalFields(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(t)
+
+	params := []int{4}
+
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		t.Errorf("could not marshal parameters: %v", err)
+	}
+
+	//nolint:exhaustruct
+	resp := handler.HandleMsg(context.Background(), jrpc.Message{
+		JSONRPC: jsonrpc,
+		ID:      new(int),
+		Method:  unexportedParamsMethod,
+		Params:  paramsJSON,
+	})
+
+	if resp.Error != nil {
+		t.Errorf("handler must ignore unexported parameters: %v", resp.Error)
 	}
 }
