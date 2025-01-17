@@ -18,14 +18,30 @@ type ArgsType struct {
 	MySecondField *int
 }
 
-func (mr *MockRegistry) GetByName(_ string) (reflect.Value, bool) {
-	return reflect.ValueOf(func(args ArgsType) int {
-		if args.MyFirstField == nil || args.MySecondField == nil {
-			return 0
+const (
+	failMethod       = "fail"
+	userDefinedError = 1
+)
+
+func (mr *MockRegistry) GetByName(method string) (jrpc.Callback, reflect.Type, bool) {
+	if method == failMethod {
+		return func(params []reflect.Value) (any, *jrpc.ProcedureError) {
+			return nil, jrpc.NewError(userDefinedError, "user defined error", nil)
+		}, reflect.TypeFor[ArgsType](), true
+	}
+
+	return func(params []reflect.Value) (any, *jrpc.ProcedureError) {
+		args, ok := params[0].Interface().(ArgsType)
+		if !ok {
+			return nil, jrpc.NewError(2, "could not get args", nil)
 		}
 
-		return *args.MyFirstField - *args.MySecondField
-	}), true
+		if args.MyFirstField == nil || args.MySecondField == nil {
+			return 0, nil
+		}
+
+		return *args.MyFirstField - *args.MySecondField, nil
+	}, reflect.TypeFor[ArgsType](), true
 }
 
 func NewHandler(t *testing.T) jrpc.DefaultHandler {
@@ -371,5 +387,24 @@ func TestDefaultHandler_HandleMsgShouldReturnAnErrorIfServerStops(t *testing.T) 
 
 	if resp.Error == nil || resp.Error.Code != jrpc.InternalError {
 		t.Errorf("server should return an internal error on stop: got %v", resp.Error)
+	}
+}
+
+func TestDefaultHandler_HandleMsgShouldReturnUserDefinedErrors(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(t)
+
+	id := 2
+
+	resp := handler.HandleMsg(context.Background(), jrpc.Message{
+		JSONRPC: jsonrpc,
+		ID:      &id,
+		Method:  failMethod,
+		Params:  []byte("[2, 3]"),
+	})
+
+	if resp.Error == nil || resp.Error.Code != userDefinedError {
+		t.Errorf("handler should return user defined error: got %v", resp.Error)
 	}
 }
