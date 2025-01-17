@@ -3,6 +3,7 @@ package jrpc
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 )
@@ -14,11 +15,40 @@ type Server struct {
 	dispatcher ClientDispatcher // Handles client connections.
 }
 
-// NewServer creates a new server with the given logger and dispatcher.
+// CreateServer creates a new server without logging.
+func CreateServer() *Server {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	return CreateServerWithLogging(logger)
+}
+
+// CreateServerWithLogging creates a new server using a given logger.
+func CreateServerWithLogging(logger *slog.Logger) *Server {
+	registry := NewRegistry(logger)
+
+	return NewServerWithRegistry(
+		logger,
+		NewClientDispatcher(
+			logger,
+			NewCallbackHandler(
+				logger,
+				registry,
+			),
+		),
+		registry,
+	)
+}
+
+// NewServer creates a new server with the given logger and dispatcher and a default registry.
+// If you don't need a custom ClientDispatcher implementation use CreateServer or CreateServerWithLogging
+// instead.
 func NewServer(l *slog.Logger, d ClientDispatcher) *Server {
 	return &Server{logger: l, dispatcher: d, register: NewRegistry(l)}
 }
 
+// NewServerWithRegistry creates a new server with the given logger, dispatcher, and register.
+// If you don't need a custom ClientDispatcher or CallbackRegister implementation use
+// CreateServer or CreateServerWithLogging instead.
 func NewServerWithRegistry(l *slog.Logger, d ClientDispatcher, r CallbackRegister) *Server {
 	return &Server{logger: l, dispatcher: d, register: r}
 }
