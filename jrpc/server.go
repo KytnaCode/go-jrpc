@@ -49,3 +49,18 @@ func (s *Server) Register(method string, handler any) error {
 
 	return nil
 }
+
+/*
+RegisterMap register a map of methods where the key is method's name and value the handler.
+If any method fails to register RegisterMap stops and return the error, all the methods
+registered before the failed one, will still registered.
+*/
+func (s *Server) RegisterMap(methods map[string]any) error {
+	for k, v := range methods {
+		if err := s.Register(k, v); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
