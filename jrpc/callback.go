@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"sync"
 )
 
 // ParametersParseError indicates an error on parameters' json parsing.
@@ -46,20 +47,58 @@ type CallbackHandler interface {
 // DefaultHandler is the default implementation for CallbackHandler.
 type DefaultHandler struct {
 	logger   *slog.Logger
-	registry MethodRegistry
+	registry CallbackRegistry
 }
 
 // NewCallbackHandler creates a new DefaultHandler.
-func NewCallbackHandler(logger *slog.Logger, registry MethodRegistry) DefaultHandler {
+func NewCallbackHandler(logger *slog.Logger, registry CallbackRegistry) DefaultHandler {
 	return DefaultHandler{logger: logger, registry: registry}
+}
+
+func (ch *DefaultHandler) HandleBatch(ctx context.Context, msgs []Message) []Message {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make(chan Message, len(msgs))
+
+	// It's called wg for convention, so ignore warning.
+	//nolint:varnamelen
+	var wg sync.WaitGroup
+
+	wg.Add(len(msgs))
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for _, msg := range msgs {
+		go func() {
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			defer wg.Done()
+
+			results <- ch.HandleMsg(ctx, msg)
+		}()
+	}
+
+	out := make([]Message, len(msgs))
+	i := 0
+
+	for result := range results {
+		out[i] = result
+		i++
+	}
+
+	return out
 }
 
 // HandleMsg handles a single message.
 func (ch *DefaultHandler) HandleMsg(ctx context.Context, msg Message) Message {
-	method, ok := ch.registry.GetByName(msg.Method) // Get the requested method.
+	callback, argsType, ok := ch.registry.GetByName(msg.Method) // Get the requested method.
 	// Check if exists
 	if !ok {
-		ch.logger.Warn("method could not be found", slog.String("method", method.Type().Name()))
+		ch.logger.Warn("method could not be found", slog.String("method", msg.Method))
 
 		return errorMessage(MethodNotFound, fmt.Sprintf("%v: not found", msg.Method), nil)
 	}
@@ -67,7 +106,7 @@ func (ch *DefaultHandler) HandleMsg(ctx context.Context, msg Message) Message {
 	// Convert msg.Params from json.RawMessage to an array of reflect.Value.
 	params, err := parseParams(
 		msg.Params,
-		method.Type().In(0), // The method's first argument should be an argument struct.
+		argsType,
 	)
 	if err != nil {
 		ch.logger.Error("could not parse params", slog.Any("error", err))
@@ -88,16 +127,34 @@ func (ch *DefaultHandler) HandleMsg(ctx context.Context, msg Message) Message {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	result := make(chan any) // Procedure result
+	resultCh := make(chan any, 1) // Procedure result
+	errCh := make(chan *ProcedureError, 1)
 
 	go func() {
-		result <- method.Call(params)[0].Interface() // Execute procedure call in a new goroutine
+		res, err := callback(params)
+		resultCh <- res
+		errCh <- err
 	}()
 
 	select {
 	case <-ctx.Done(): // If context is done, stop procedure.
 		return errorMessage(InternalError, "server stopped", nil)
-	case res := <-result:
+	case res := <-resultCh:
+		if err := <-errCh; err != nil {
+			return Message{
+				JSONRPC: jsonrpc,
+				ID:      msg.ID,
+				Error: &Error{
+					Code:    err.code,
+					Message: err.msg,
+					Data:    err.data,
+				},
+				Method: "",
+				Params: nil,
+				Result: nil,
+			}
+		}
+
 		resp := Message{
 			JSONRPC: jsonrpc,
 			ID:      msg.ID,
