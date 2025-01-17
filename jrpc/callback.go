@@ -226,6 +226,14 @@ func parsePositionalParams(raw json.RawMessage, argsType reflect.Type) ([]reflec
 
 	args := reflect.New(argsType) // Create the arguments struct.
 
+	if argsType == reflect.TypeFor[any]() {
+		if dec.More() {
+			return nil, InvalidParametersError{cause: "too many parameters"}
+		}
+
+		return []reflect.Value{}, nil
+	}
+
 	for fieldIndex := range argsType.NumField() {
 		if !argsType.Field(fieldIndex).IsExported() {
 			continue
@@ -265,6 +273,14 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 
 	if err := dec.Decode(&params); err != nil {
 		return nil, ParametersParseError{err: err}
+	}
+
+	if argsType == reflect.TypeFor[any]() {
+		if len(params) != 0 {
+			return nil, InvalidParametersError{cause: "too many parameters"}
+		}
+
+		return []reflect.Value{}, nil
 	}
 
 	// Create args struct.
