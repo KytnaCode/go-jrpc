@@ -51,8 +51,8 @@ type DefaultHandler struct {
 }
 
 // NewCallbackHandler creates a new DefaultHandler.
-func NewCallbackHandler(logger *slog.Logger, registry CallbackRegistry) DefaultHandler {
-	return DefaultHandler{logger: logger, registry: registry}
+func NewCallbackHandler(logger *slog.Logger, registry CallbackRegistry) *DefaultHandler {
+	return &DefaultHandler{logger: logger, registry: registry}
 }
 
 func (ch *DefaultHandler) HandleBatch(ctx context.Context, msgs []Message) []Message {
