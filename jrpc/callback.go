@@ -170,6 +170,10 @@ func (ch *DefaultHandler) HandleMsg(ctx context.Context, msg Message) Message {
 
 // parseParams parses a json array or object into an array of reflect.Value.
 func parseParams(raw json.RawMessage, argsType reflect.Type) ([]reflect.Value, error) {
+	if raw == nil { // Allow nil params.
+		return []reflect.Value{}, nil
+	}
+
 	if isArray(raw) {
 		return parsePositionalParams(raw, argsType)
 	}
@@ -178,7 +182,7 @@ func parseParams(raw json.RawMessage, argsType reflect.Type) ([]reflect.Value, e
 		return parseNamedParameters(raw, argsType)
 	}
 
-	return nil, InvalidParametersError{cause: "parameters must be an array or an object"}
+	return nil, InvalidParametersError{cause: "parameters must be an array, an object or nil"}
 }
 
 // readBracket reads the next token from dec and returns error if dec.Token return a non EOF error.
