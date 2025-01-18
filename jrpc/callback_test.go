@@ -15,7 +15,7 @@ type MockRegistry struct{}
 
 type ArgsType struct {
 	MyFirstField  *int
-	MySecondField *int
+	MySecondField *int `json:",omitempty"`
 }
 
 type UnexportedFieldsArgs struct {
@@ -332,7 +332,7 @@ func TestDefaultHandler_HandleMsgShouldReturnAnErrorWithTooFewNamedParameters(t 
 
 	handler := NewHandler(t)
 
-	params := struct{ MyFirstField *int }{MyFirstField: new(int)}
+	params := struct{ MySecondField int }{MySecondField: 2}
 
 	paramsJSON, err := json.Marshal(params) //nolint:musttag
 	if err != nil {
@@ -470,5 +470,80 @@ func TestDefaultHandler_HandleMsgShouldIgnoreUnexportedPositionalFields(t *testi
 
 	if resp.Error != nil {
 		t.Errorf("handler must ignore unexported parameters: %v", resp.Error)
+	}
+}
+
+func TestDefaultHandler_HandleMsgShouldNotReturnAnErrorWhenNotIncludingAnOptionalParameter(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(t)
+
+	params := struct{ MyFirstField int }{MyFirstField: 4}
+
+	paramsJSON, err := json.Marshal(params) //nolint:musttag
+	if err != nil {
+		t.Errorf("could not parse parameters: %v", err)
+	}
+
+	//nolint:exhaustruct
+	resp := handler.HandleMsg(context.Background(), jrpc.Message{
+		JSONRPC: jsonrpc,
+		ID:      new(int),
+		Method:  "method",
+		Params:  paramsJSON,
+	})
+
+	if resp.Error != nil {
+		t.Errorf("handler must not return an error when an optional parameter is missing: %v", resp.Error)
+	}
+}
+
+func TestDefaultHandler_HandleMsgShouldReturnAnErrorWithMissingOptionalPositionalParameter(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(t)
+
+	params := []int{2}
+
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		t.Errorf("could not parse parameters: %v", err)
+	}
+
+	//nolint:exhaustruct
+	resp := handler.HandleMsg(context.Background(), jrpc.Message{
+		JSONRPC: jsonrpc,
+		ID:      new(int),
+		Method:  "method",
+		Params:  paramsJSON,
+	})
+
+	if resp.Error == nil {
+		t.Errorf("handler must return an error when an optional parameter is missing instead of nil")
+	}
+}
+
+func TestDefaultHandler_HandleMsgShouldNotReturnAnErrorWithNilOptionalPositionalParameter(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(t)
+
+	params := []any{2, nil}
+
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		t.Errorf("could not parse parameters: %v", err)
+	}
+
+	//nolint:exhaustruct
+	resp := handler.HandleMsg(context.Background(), jrpc.Message{
+		JSONRPC: jsonrpc,
+		ID:      new(int),
+		Method:  "method",
+		Params:  paramsJSON,
+	})
+
+	if resp.Error != nil {
+		t.Errorf("handler must not return an error when an optional parameter is missing: %v", resp.Error)
 	}
 }

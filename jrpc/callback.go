@@ -287,7 +287,7 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 	// Create args struct.
 	args := reflect.New(argsType)
 
-	exportedFields := 0
+	expectedParameters := 0
 
 	// Check if all parameters are present.
 	for fieldIndex := range argsType.NumField() {
@@ -295,20 +295,34 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 			continue
 		}
 
-		exportedFields++
+		expectedParameters++
 
 		field := argsType.Field(fieldIndex)
 
-		var name string
+		name, omitEmpty := field.Name, false
+
+		var tagValues []string
 
 		if tag, ok := argsType.Field(fieldIndex).Tag.Lookup("json"); ok {
-			name = strings.Split(tag, ",")[0]
-		} else {
-			name = field.Name
+			tagValues = strings.Split(tag, ",")
+
+			if len(tagValues) >= 1 && tagValues[0] != "" {
+				name = tagValues[0]
+			}
+
+			if len(tagValues) == 2 {
+				omitEmpty = tagValues[1] == "omitempty"
+			}
 		}
 
 		value, ok := params[name]
 		if !ok {
+			if omitEmpty {
+				expectedParameters--
+
+				continue
+			}
+
 			return nil, InvalidParametersError{
 				cause: fmt.Sprintf("parameter %v is missing", name),
 			}
@@ -326,10 +340,8 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 		args.Elem().Field(fieldIndex).Set(param)
 	}
 
-	if len(params) != exportedFields {
-		return nil, InvalidParametersError{
-			cause: fmt.Sprintf("expected exactly %v parameters: got %v", exportedFields, len(params)),
-		}
+	if len(params) != expectedParameters {
+		return nil, InvalidParametersError{cause: "too many parameters"}
 	}
 
 	return []reflect.Value{args.Elem()}, nil
