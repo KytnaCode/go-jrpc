@@ -7,10 +7,13 @@ import (
 )
 
 var (
-	ErrHandlerType      = errors.New("handler must be a function")
-	ErrTooManyArguments = errors.New("handler must have only one argument in form of a struct")
-	ErrArgumentsType    = errors.New("handler arguments must be a struct (non-pointer)")
-	ErrInvalidSignature = errors.New("invalid method signature")
+	ErrHandlerType       = errors.New("handler must be a function")
+	ErrTooManyArguments  = errors.New("handler must have only one argument in form of a struct")
+	ErrArgumentsType     = errors.New("handler arguments must be a struct (non-pointer)")
+	ErrInvalidSignature  = errors.New("invalid method signature")
+	ErrOnlyPointerFields = errors.New(
+		"all exported fields of handler's argument struct must be pointers",
+	)
 )
 
 // Callback signature. For methods that don't return one or both a value and an error the
@@ -81,6 +84,16 @@ func (cr *DefaultRegistry) Register(method string, handler any) error {
 		}
 
 		argsTypes = handlerValue.Type().In(0)
+
+		for i := range argsTypes.NumField() {
+			if !argsTypes.Field(i).IsExported() {
+				continue
+			}
+
+			if argsTypes.Field(i).Type.Kind() != reflect.Pointer {
+				return ErrOnlyPointerFields
+			}
+		}
 	default:
 		return ErrTooManyArguments
 	}
