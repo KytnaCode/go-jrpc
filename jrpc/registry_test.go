@@ -24,7 +24,7 @@ func TestDefaultRegistry_RegisterShouldReturnANilErrorWithStructIn(t *testing.T)
 
 	registry := jrpc.NewRegistry(newLogger(t))
 
-	handler := func(_ struct{ MyField int }) {}
+	handler := func(_ struct{ MyField *int }) {}
 
 	if err := registry.Register("handler", handler); err != nil {
 		t.Errorf("struct input should work: %v", err)
