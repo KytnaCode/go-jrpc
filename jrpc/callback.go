@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -296,10 +297,20 @@ func parseNamedParameters(raw json.RawMessage, argsType reflect.Type) ([]reflect
 
 		exportedFields++
 
-		value, ok := params[argsType.Field(fieldIndex).Name]
+		field := argsType.Field(fieldIndex)
+
+		var name string
+
+		if tag, ok := argsType.Field(fieldIndex).Tag.Lookup("json"); ok {
+			name = strings.Split(tag, ",")[0]
+		} else {
+			name = field.Name
+		}
+
+		value, ok := params[name]
 		if !ok {
 			return nil, InvalidParametersError{
-				cause: fmt.Sprintf("parameter %v is missing", fieldIndex),
+				cause: fmt.Sprintf("parameter %v is missing", name),
 			}
 		}
 
