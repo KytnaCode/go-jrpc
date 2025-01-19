@@ -1,129 +1,77 @@
 package jrpc
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net"
 )
 
-// ClientDispatcher handles client connections parsing their requests and dispatching messages
-// and batch requests to their correct callback.
-type ClientDispatcher interface {
-	// Dispatch handles a client connection, parsing its content and dispatching messages
-	// and batch requests to their correct callbacks, the connection is closed on finish.
-	// Can be called concurrently.
-	Dispatch(ctx context.Context, conn net.Conn)
+type Client struct {
+	conn net.Conn
 }
 
-// NewClientDispatcher creates a new instance of jrpc.DefaultDispatcher.
-func NewClientDispatcher(logger *slog.Logger, handler CallbackHandler) *DefaultDispatcher {
-	return &DefaultDispatcher{logger: logger, handler: handler}
+// NewClient creates a new JSON-RPC 2.0 client over conn.
+func NewClient(conn net.Conn) *Client {
+	return &Client{conn: conn}
 }
 
-// DefaultDispatcher is the default implementation of ClientDispatcher.
-type DefaultDispatcher struct {
-	logger  *slog.Logger
-	handler CallbackHandler // Handles messages
-}
-
-// Dispatch implements jrpc.ClientDispatcher.Dispatch.
-func (cd *DefaultDispatcher) Dispatch(ctx context.Context, conn net.Conn) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	defer conn.Close()
-
-	// Get the raw message because we don't know if it's a batch request or a single message.
-	var raw json.RawMessage
-
-	parseError := errorMessage(ParseError, "could not parse request", nil)
-
-	err := json.NewDecoder(conn).Decode(&raw)
-	if cd.handleError(err, conn, parseError) {
-		return
-	}
-
-	msgs, batch, err := parseMessages(raw)
-	if cd.handleError(err, conn, parseError) {
-		return
-	}
-
-	internalError := errorMessage(InternalError, "could not write response", nil)
-
-	if batch {
-		resp := cd.handler.HandleBatch(ctx, msgs)
-
-		err := json.NewEncoder(conn).Encode(resp)
-		// Is not necessary to check return value here because there's no extra error handling code.
-		cd.handleError(err, conn, internalError)
-
-		return
-	}
-
-	resp := cd.handler.HandleMsg(ctx, msgs[0])
-
-	err = json.NewEncoder(conn).Encode(resp)
-	cd.handleError(err, conn, internalError) // We don't need extra error handling here either.
-}
-
-// handleError logs the error and send an error response.
-func (cd *DefaultDispatcher) handleError(err error, conn net.Conn, errMsg Message) bool {
+// Dial works like net.Dial but instead of returning a net.Conn returns a new JSON-RPC client.
+func Dial(network, address string) (*Client, error) {
+	conn, err := net.Dial(network, address)
 	if err != nil {
-		err = json.NewEncoder(conn).Encode(errMsg) // Send error.
-		if err != nil {
-			cd.logger.Error("error handling request", slog.Any("error", err))
-		}
-
-		return true
+		return nil, fmt.Errorf("jrpc.Client: could not dial addr: %w", err)
 	}
 
-	return false
+	return &Client{conn: conn}, nil
 }
 
-// parseMessages parses a raw json.RawMessage into a list of messages, and a boolean
-// that is true when the request is a batch of messages.
-// if raw is a single message object parseMessages will return a list with only one message,
-// if the raw is an array of only one message it is still a batch request.
-func parseMessages(raw json.RawMessage) ([]Message, bool, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
+// NewRequest creates a new JSON-RPC request.
+func NewRequest(rpcID *int, method string, params json.RawMessage) *Message {
+	return &Message{
+		JSONRPC: jsonrpc,
+		ID:      rpcID,
+		Method:  method,
+		Params:  params,
+		Error:   nil,
+		Result:  nil,
+	}
+}
 
-	var msgs []Message
-
-	// readBracket check if raw is a batch, if it is then read the array bracket.
-	readBracket := func() ([]Message, error) {
-		if isArray(raw) {
-			if _, err := dec.Token(); errors.Is(err, io.EOF) {
-				return []Message{}, nil // If is an empty list.
-			} else if err != nil {
-				return nil, fmt.Errorf("could not read batch: %w", err)
-			}
-		}
-
-		return nil, nil
+// Do sends a request and returns its response.
+func (c *Client) Do(req *Message) (*Message, error) {
+	if err := json.NewEncoder(c.conn).Encode(req); err != nil {
+		return nil, fmt.Errorf("could not write request: %w", err)
 	}
 
-	if emptyMsgs, err := readBracket(); err != nil {
-		return emptyMsgs, true, err
+	var resp Message
+
+	if err := json.NewDecoder(c.conn).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("could not decode response: %w", err)
 	}
 
-	// Decode messages.
-	for dec.More() {
-		var msg Message
+	return &resp, nil
+}
 
-		if err := dec.Decode(&msg); err != nil {
-			return nil, false, fmt.Errorf("could not decode messages: %w", err)
-		}
-
-		msgs = append(msgs, msg)
+// DoBatch sends a batch of requests and return its responses.
+func (c *Client) DoBatch(req []*Message) ([]*Message, error) {
+	if err := json.NewEncoder(c.conn).Encode(req); err != nil {
+		return nil, fmt.Errorf("could not write request: %w", err)
 	}
 
-	if emptyMsgs, err := readBracket(); err != nil {
-		return emptyMsgs, true, err
+	var resp []*Message
+
+	if err := json.NewDecoder(c.conn).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("could not decode response: %w", err)
 	}
 
-	return msgs, isArray(raw), nil
+	return resp, nil
+}
+
+// Close closes the underlying connection.
+func (c *Client) Close() error {
+	if err := c.conn.Close(); err != nil {
+		return fmt.Errorf("client close error: %w", err)
+	}
+
+	return nil
 }
