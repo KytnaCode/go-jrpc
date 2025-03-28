@@ -5,7 +5,10 @@ import (
 	"net/http"
 )
 
-const JsonRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
+const (
+	JsonRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
+	ParseError     = -32700
+)
 
 type Server struct {
 	errorLog func(string, ...any) // Log errors.
