@@ -69,7 +69,7 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 			var msg json.RawMessage // Raw JSON-RPC message.
 
 			if err := dec.Decode(&msg); err == io.EOF { // Connection closed.
-				break
+				return
 			} else if err != nil { // Decode error.
 				s.errorLog("failed to decode message: %v", err)
 				continue
