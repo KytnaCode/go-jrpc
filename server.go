@@ -2,8 +2,10 @@ package jrpc
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
+	"sync"
 )
 
 const (
@@ -48,4 +50,57 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	panic("not implemented")
+}
+
+// handleBatchRPC handles concurrently a batch of requests, the order of the responses can be different from the order of the requests,
+// the response's ID must be used to match the request's ID.
+func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
+	type result struct {
+		res *Response
+		err error
+	}
+
+	var reqs []Request // Batch of requests.
+
+	if err := json.Unmarshal(*msg, &reqs); err != nil { // Unmarshal batch of requests.
+		return nil, err
+	}
+
+	resCh := make(chan result, len(reqs)) // Channel of results.
+
+	var wg sync.WaitGroup
+	wg.Add(len(reqs))
+
+	for _, req := range reqs {
+		go func(req Request) {
+			defer wg.Done()
+
+			var res Response
+
+			err := s.handleRPC(&req, &res) // Handle request.
+
+			resCh <- result{&res, err}
+		}(req)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resCh)
+	}()
+
+	res := make([]Response, 0, len(reqs))
+
+	for result := range resCh {
+		if result.err != nil {
+			return nil, result.err
+		}
+
+		res = append(res, *result.res)
+	}
+
+	return res, nil
+}
+
+func (s *Server) handleRPC(_ *Request, _ *Response) error {
+	return nil // TODO: not implemented
 }
