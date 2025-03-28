@@ -44,6 +44,7 @@ func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
 }
 
 func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
+func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 }
