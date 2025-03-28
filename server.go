@@ -20,6 +20,10 @@ type Server struct {
 }
 
 func NewServer(errorLog func(string, ...any)) *Server {
+	if errorLog == nil {
+		errorLog = func(string, ...any) {}
+	}
+
 	return &Server{errorLog: errorLog}
 }
 
