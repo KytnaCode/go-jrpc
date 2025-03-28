@@ -4,10 +4,10 @@ import "encoding/json"
 
 // Response represents a JSON-RPC response.
 type Response struct {
-	JSONRPC string      `json:"jsonrpc,omitempty"` // Must be "2.0".
-	Result  any         `json:"result,omitempty"`  // The result of the call, must not be nil on success.
-	Error   *Error      `json:"error,omitempty"`   // The error of the call, must not be nil on failure.
-	ID      json.Number `json:"id"`                // The request identifier, must match the response identifier.
+	JSONRPC string       `json:"jsonrpc,omitempty"` // Must be "2.0".
+	Result  any          `json:"result,omitempty"`  // The result of the call, must not be nil on success.
+	Error   *Error       `json:"error,omitempty"`   // The error of the call, must not be nil on failure.
+	ID      *json.Number `json:"id"`                // The request identifier, must match the response identifier.
 }
 
 // Error represents a JSON-RPC error.
