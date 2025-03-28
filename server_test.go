@@ -90,10 +90,9 @@ func TestServer_ServeConnInvalidBatch(t *testing.T) {
 
 	// An invalid batch request.
 	const batch = `[
-	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1 },
-		"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 2 }
-		]` // missing opening brace for second request.
-
+	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1 }
+	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 2 }
+		]` // missing comma between the two requests.
 	r, w := io.Pipe() // Create a pipe to simulate a connection.
 
 	conn := newIOReadWriteCloser(strings.NewReader(batch), w)
