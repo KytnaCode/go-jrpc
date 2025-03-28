@@ -75,8 +75,12 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 				continue
 			}
 
-			firstByte := bytes.TrimLeft(msg, " \t\n")[0] // First non-whitespace byte.
-
+			trimmedMsg := bytes.TrimLeft(msg, " \t\n") // Trim leading whitespace.
+			if len(trimmedMsg) == 0 {
+				s.errorLog("empty message received")
+				continue
+			}
+			firstByte := trimmedMsg[0] // First non-whitespace byte.
 			if firstByte == '[' { // Batch request.
 				res, err := s.handleBatchRPC(&msg)
 				if err != nil {
