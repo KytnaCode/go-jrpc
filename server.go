@@ -52,6 +52,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	panic("not implemented")
 }
 
+// parseError returns a JSON-RPC response with a parse error.
+func parseError(err error) *Response {
+	data := ""
+
+	if err != nil {
+		data = err.Error()
+	}
+
+	return &Response{
+		JSONRPC: JsonRPCVersion,
+		Error: &Error{
+			Code:    ParseError,
+			Message: "Parse error",
+			Data:    data,
+		},
+	}
+}
+
 // handleBatchRPC handles concurrently a batch of requests, the order of the responses can be different from the order of the requests,
 // the response's ID must be used to match the request's ID.
 func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
