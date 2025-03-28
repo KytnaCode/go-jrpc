@@ -1,8 +1,10 @@
 package jrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -43,10 +45,79 @@ func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
 	}
 }
 
-func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
+// ServeConn reads and writes JSON-RPC messages from conn.
+// It decodes the requests from conn and encodes the responses back to conn.
+// Closes conn when done.
 func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	defer conn.Close()
+
+	dec := json.NewDecoder(conn)
+	enc := json.NewEncoder(conn)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			var msg json.RawMessage // Raw JSON-RPC message.
+
+			if err := dec.Decode(&msg); err == io.EOF { // Connection closed.
+				break
+			} else if err != nil { // Decode error.
+				s.errorLog("failed to decode message: %v", err)
+				continue
+			}
+
+			firstByte := bytes.TrimLeft(msg, " \t\n")[0] // First non-whitespace byte.
+
+			if firstByte == '[' { // Batch request.
+				res, err := s.handleBatchRPC(&msg)
+				if err != nil {
+					s.errorLog("failed to handle batch RPC: %v", err)
+					continue
+				}
+
+				if err := enc.Encode(res); err != nil {
+					s.errorLog("failed to encode response: %v", err)
+				}
+
+				continue
+			}
+
+			if firstByte == '{' { // Single request.
+				var req Request
+				if err := json.Unmarshal(msg, &req); err != nil {
+					// Send parse error response.
+					s.errorLog("failed to unmarshal request: %v", err)
+
+					if err := enc.Encode(parseError(err)); err != nil {
+						s.errorLog("failed to encode response: %v", err)
+
+						continue
+					}
+				}
+
+				var res Response
+				if err := s.handleRPC(&req, &res); err != nil {
+					s.errorLog("failed to handle RPC: %v", err)
+					continue
+				}
+
+				if err := enc.Encode(res); err != nil {
+					s.errorLog("failed to encode response: %v", err)
+				}
+
+				continue
+			}
+
+			if err := enc.Encode(parseError(nil)); err != nil {
+				s.errorLog("failed to encode response: %v", err)
+			}
+		}
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
