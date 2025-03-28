@@ -5,10 +5,12 @@ import (
 	"net/http"
 )
 
-type Server struct{}
+type Server struct {
+	errorLog func(string, ...any) // Log errors.
+}
 
-func NewServer() *Server {
-	return &Server{}
+func NewServer(errorLog func(string, ...any)) *Server {
+	return &Server{errorLog: errorLog}
 }
 
 func (s *Server) Register(method string, handler any) {
