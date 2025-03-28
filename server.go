@@ -1,6 +1,7 @@
 package jrpc
 
 import (
+	"context"
 	"net"
 	"net/http"
 )
@@ -22,18 +23,27 @@ func (s *Server) Register(method string, handler any) {
 	panic("not implemented")
 }
 
-func (s *Server) Accept(lis net.Listener) error {
+func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	for {
-		conn, err := lis.Accept()
-		if err != nil {
-			return err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			conn, err := lis.Accept()
+			if err != nil {
+				return err
+			}
+			go s.ServeConn(ctx, conn)
 		}
-		go s.ServeConn(conn)
 	}
 }
 
-func (s *Server) ServeConn(conn net.Conn) {
-	panic("not implemented")
+func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
