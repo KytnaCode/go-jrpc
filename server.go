@@ -200,6 +200,10 @@ func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool
 		var res Response
 		s.handleRPC(&req, &res)
 
+		if res.noreply {
+			return []Response{}, false, nil
+		}
+
 		return []Response{res}, false, nil
 	}
 
@@ -274,6 +278,10 @@ func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 	responses := make([]Response, 0, len(reqs))
 
 	for res := range resCh {
+		if res.noreply { // Don't include responses that are notifications.
+			continue
+		}
+
 		responses = append(responses, *res)
 	}
 
@@ -282,8 +290,11 @@ func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 
 // handleRPC handles a single request.
 func (s *Server) handleRPC(req *Request, res *Response) {
-	id := req.ID // Copy ID.
-	res.ID = &id // Make response ID the same as the request ID.
+	if req.ID == nil { // A notification, don't send a response.
+		res.noreply = true
+	} else {
+		res.ID = req.ID // Set response ID.
+	}
 
 	res.JSONRPC = JsonRPCVersion // Must be "2.0" for all JSON-RPC 2.0 messages.
 
@@ -314,6 +325,10 @@ func (s *Server) handleRPC(req *Request, res *Response) {
 	} else if err != nil {
 		internalError(nil, res)
 
+		return
+	}
+
+	if res.noreply {
 		return
 	}
 
