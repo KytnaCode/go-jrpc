@@ -65,7 +65,12 @@ func (r *Registry) Call(method string, params any) (any, error) {
 
 	handlerV := reflect.ValueOf(handler)
 
-	paramsV := reflect.ValueOf(params)
+	var paramsV reflect.Value
+	if params != nil {
+		paramsV = reflect.ValueOf(params)
+	} else {
+		paramsV = reflect.Zero(handlerV.Type().In(handlerParamsIndex))
+	}
 
 	replyV := reflect.New(handlerV.Type().In(handlerReplyIndex).Elem()) // Pass reply as reference.
 
