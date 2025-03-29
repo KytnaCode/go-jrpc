@@ -55,7 +55,7 @@ func Params[T any](params []byte) (T, error) {
 
 func ParamsType(t reflect.Type, params []byte) (any, error) {
 	// Check if the params are a struct or a pointer to a struct.
-	if t.Kind() != reflect.Struct && (t.Kind() != reflect.Pointer && t.Elem().Kind() != reflect.Struct) {
+	if t.Kind() != reflect.Struct && !(t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct) {
 		return reflect.Zero(t).Interface(), fmt.Errorf("params must be a struct or a pointer: %w", ErrInvalidParams)
 	}
 

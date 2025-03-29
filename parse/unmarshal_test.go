@@ -273,3 +273,40 @@ func TestParseParamsType_InvalidParams(t *testing.T) {
 		})
 	}
 }
+
+func TestParseParamsType_NonStructOrPointerToStruct(t *testing.T) {
+	t.Parallel()
+
+	type data struct {
+		params []byte
+		t      reflect.Type
+	}
+
+	testData := map[string]data{
+		"int": {
+			params: []byte(`1`),
+			t:      reflect.TypeFor[int](),
+		},
+		"string": {
+			params: []byte(`"string"`),
+			t:      reflect.TypeFor[string](),
+		},
+		"array": {
+			params: []byte(`["hello", "world"]`),
+			t:      reflect.TypeFor[[]string](),
+		},
+		"object": {
+			params: []byte(`{ "hello": "world" }`),
+			t:      reflect.TypeFor[map[string]string](),
+		},
+	}
+
+	for name, data := range testData {
+		t.Run(name, func(t *testing.T) {
+			_, err := parse.ParamsType(data.t, data.params)
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+		})
+	}
+}
