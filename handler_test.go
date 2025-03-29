@@ -1,6 +1,7 @@
 package jrpc_test
 
 import (
+	"reflect"
 	"sync"
 	"testing"
 
@@ -167,4 +168,42 @@ func TestRegistry_CallShouldBeGoroutineSafeWithAnExistingMethod(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestRegistry_MethodParamsTypeShouldReturnCorrectType(t *testing.T) {
+	t.Parallel()
+
+	r := jrpc.NewRegistry()
+
+	type args struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	err := r.Register("method", func(args *args, reply *struct{}) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := r.MethodParamsType("method")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := reflect.TypeFor[*args]()
+
+	if got != want {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+func TestRegistry_MethodParamsTypeShouldReturnErrorWithNonExistingMethod(t *testing.T) {
+	t.Parallel()
+
+	r := jrpc.NewRegistry()
+
+	_, err := r.MethodParamsType("method")
+	if err == nil {
+		t.Error("expected an error, got nil")
+	}
 }
