@@ -309,11 +309,15 @@ func (s *Server) handleRPC(req *Request, res *Response) {
 		return
 	}
 
-	params, err := parse.ParamsType(paramsT, *req.Params) // Parse params.
-	if err != nil {
-		internalError(nil, res)
+	var params any
 
-		return
+	if req.Params != nil {
+		params, err = parse.ParamsType(paramsT, *req.Params) // Parse params.
+		if err != nil {
+			internalError(nil, res)
+
+			return
+		}
 	}
 
 	result, err := s.registry.Call(req.Method, params) // Call method.
