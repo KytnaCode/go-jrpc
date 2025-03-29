@@ -277,7 +277,7 @@ func TestServer_ServeHTTPValidSingle(t *testing.T) {
 	t.Parallel()
 
 	// A valid single request.
-	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
+	const request = `{"jsonrpc": "2.0", "method": "foo", "id": 1}`
 
 	r := strings.NewReader(request)
 
@@ -288,6 +288,10 @@ func TestServer_ServeHTTPValidSingle(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	s := jrpc.NewServer(nil)
+
+	if err := s.Register("foo", func(args, reply *struct{}) error { return nil }); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
 
 	s.ServeHTTP(w, req)
 
@@ -487,5 +491,75 @@ func TestServer_ServeHTTPShouldNotPanicWithoutParams(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPMissingJSONRPCVersion(t *testing.T) {
+	t.Parallel()
+
+	const request = `{"method": "foo", "params": [ "bar" ], "id": 1}` // Missing jsonrpc version.
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var res jrpc.Response
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("expected valid JSON, got %v", err)
+	}
+
+	if res.Error == nil {
+		t.Fatalf("expected an error, got nil")
+	}
+
+	if res.Error.Code != jrpc.InvalidRequest {
+		t.Fatalf("expected error code %d, got %d", jrpc.InvalidRequest, res.Error.Code)
+	}
+}
+
+func TestServer_ServeHTTPEmptyMethodShouldReturnBadRequest(t *testing.T) {
+	t.Parallel()
+
+	const request = `{"jsonrpc": "2.0", "method": "", "params": [ "bar" ], "id": 1}` // Empty method.
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var res jrpc.Response
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("expected valid JSON, got %v", err)
+	}
+
+	if res.Error == nil {
+		t.Fatalf("expected an error, got nil")
+	}
+
+	if res.Error.Code != jrpc.InvalidRequest {
+		t.Fatalf("expected error code %d, got %d", jrpc.InvalidRequest, res.Error.Code)
 	}
 }
