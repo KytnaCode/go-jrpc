@@ -81,6 +81,16 @@ func (r *Registry) Register(method string, handler any) error {
 	return nil
 }
 
+// MethodParamsType returns the type of the method's arguments type.
+func (r *Registry) MethodParamsType(method string) (reflect.Type, error) {
+	handler, ok := r.handlers.Load(method)
+	if !ok {
+		return nil, fmt.Errorf("method %q not found: %w", method, ErrMethodNotFound)
+	}
+
+	return reflect.TypeOf(handler).In(handlerParamsIndex), nil
+}
+
 // validateHandler checks handler type.
 func validateHandler(handlerT reflect.Type) error {
 	if handlerT.Kind() != reflect.Func { // Must be a function.
