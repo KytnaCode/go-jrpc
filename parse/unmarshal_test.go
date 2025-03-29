@@ -1,6 +1,7 @@
 package parse_test
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -130,6 +131,15 @@ func TestParseParams_InvalidParams(t *testing.T) {
 			// Replace `name` field to not trigger extra parameters error, we want to test the unknown field error.
 			params: fmt.Appendf(nil, `{"unknown": "unknown", "last": "%v", "age": %v, "nested": { "email": "%v" }}`, last, age, email),
 		},
+		"int": {
+			params: []byte(`1`),
+		},
+		"string": {
+			params: []byte(`"string"`),
+		},
+		"wrong type": {
+			params: fmt.Appendf(nil, `{"name": "%v", "last": "%v", "age": "%v", "nested": { "email": "%v" }}`, 34, 26, "wrong types", true),
+		},
 	}
 
 	for name, data := range testData {
@@ -137,6 +147,10 @@ func TestParseParams_InvalidParams(t *testing.T) {
 			_, err := parse.Params[args](data.params)
 			if err == nil {
 				t.Error("expected error, got nil")
+			}
+
+			if !errors.Is(err, parse.ErrInvalidParams) {
+				t.Errorf("expected %v, got %v", parse.ErrInvalidParams, err)
 			}
 		})
 	}

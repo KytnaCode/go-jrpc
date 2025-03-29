@@ -19,6 +19,7 @@ const (
 	ParseError     = -32700
 	InvalidRequest = -32600
 	MethodNotFound = -32601
+	InvalidParams  = -32602
 	InternalError  = -32603
 )
 
@@ -176,6 +177,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 			if errObj.Code == InternalError {
 				w.WriteHeader(http.StatusInternalServerError) // Internal error.
+			}
+
+			if errObj.Code == InvalidParams {
+				w.WriteHeader(http.StatusBadRequest) // Invalid params.
 			}
 		}
 
