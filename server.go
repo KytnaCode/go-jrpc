@@ -131,6 +131,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if err := enc.Encode(parseError(err)); err != nil {
 			s.errorLog("failed to encode parse error: %v", err)
 		}
+
+		return
 	}
 
 	// If no responses, don't write anything at all.
