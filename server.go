@@ -1,7 +1,6 @@
 package jrpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/kytnacode/go-jrpc/jsonutil"
 )
 
 const (
@@ -162,7 +163,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Caller must handle the case where the response slice is empty.
 // If an error occurs responses slice will be nil and batch will be false.
 func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool, err error) {
-	trimmedMsg := bytes.TrimLeft(*msg, " \t\n") // Trim leading whitespace.
+	trimmedMsg := jsonutil.TrimLeftWhitespace(*msg) // Trim leading whitespace.
 	if len(trimmedMsg) == 0 {
 		return nil, false, errors.New("empty message received")
 	}
