@@ -10,11 +10,14 @@ import (
 	"sync"
 
 	"github.com/kytnacode/go-jrpc/jsonutil"
+	"github.com/kytnacode/go-jrpc/parse"
 )
 
 const (
 	JsonRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
 	ParseError     = -32700
+	MethodNotFound = -32601
+	InternalError  = -32603
 )
 
 var (
@@ -22,6 +25,7 @@ var (
 )
 
 type Server struct {
+	registry MethodRegister       // Registry of methods.
 	errorLog func(string, ...any) // Log errors.
 }
 
@@ -30,11 +34,17 @@ func NewServer(errorLog func(string, ...any)) *Server {
 		errorLog = func(string, ...any) {}
 	}
 
-	return &Server{errorLog: errorLog}
+	return &Server{errorLog: errorLog, registry: NewRegistry()}
 }
 
-func (s *Server) Register(method string, handler any) {
-	panic("not implemented")
+// SetRegistry sets the registry of methods, if not set, a new registry is created.
+func (s *Server) SetRegistry(registry MethodRegister) {
+	s.registry = registry
+}
+
+// Register registers a method with the server. Implements the Register interface.
+func (s *Server) Register(method string, handler any) error {
+	return s.registry.Register(method, handler)
 }
 
 func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
@@ -188,9 +198,7 @@ func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool
 		}
 
 		var res Response
-		if err := s.handleRPC(&req, &res); err != nil {
-			return nil, false, err
-		}
+		s.handleRPC(&req, &res)
 
 		return []Response{res}, false, nil
 	}
@@ -206,31 +214,42 @@ func parseError(err error) *Response {
 		data = err.Error()
 	}
 
-	return &Response{
-		JSONRPC: JsonRPCVersion,
-		Error: &Error{
-			Code:    ParseError,
-			Message: "Parse error",
-			Data:    data,
-		},
+	res := new(Response)
+
+	rpcError(ParseError, "Parse error", data, res)
+
+	return res
+}
+
+// internalError sets response's error to an internal error. data may be nil.
+func internalError(data any, res *Response) {
+	rpcError(InternalError, "Internal error", data, res)
+}
+
+// methodNotFound sets response's error to a method not found error.
+func methodNotFound(method string, res *Response) {
+	rpcError(MethodNotFound, "Method not found", method, res)
+}
+
+// rpcError sets response's error to a custom error. data may be nil.
+func rpcError(code int, message string, data any, res *Response) {
+	res.Error = &Error{
+		Code:    code,
+		Message: message,
+		Data:    data,
 	}
 }
 
 // handleBatchRPC handles concurrently a batch of requests, the order of the responses can be different from the order of the requests,
 // the response's ID must be used to match the request's ID.
 func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
-	type result struct {
-		res *Response
-		err error
-	}
-
 	var reqs []Request // Batch of requests.
 
 	if err := json.Unmarshal(*msg, &reqs); err != nil { // Unmarshal batch of requests.
 		return nil, ErrParse
 	}
 
-	resCh := make(chan result, len(reqs)) // Channel of results.
+	resCh := make(chan *Response, len(reqs)) // Channel of results.
 
 	var wg sync.WaitGroup
 	wg.Add(len(reqs))
@@ -241,9 +260,9 @@ func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 
 			var res Response
 
-			err := s.handleRPC(&req, &res) // Handle request.
+			s.handleRPC(&req, &res) // Handle request.
 
-			resCh <- result{&res, err}
+			resCh <- &res
 		}(req)
 	}
 
@@ -252,19 +271,51 @@ func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 		close(resCh)
 	}()
 
-	res := make([]Response, 0, len(reqs))
+	responses := make([]Response, 0, len(reqs))
 
-	for result := range resCh {
-		if result.err != nil {
-			return nil, result.err
-		}
-
-		res = append(res, *result.res)
+	for res := range resCh {
+		responses = append(responses, *res)
 	}
 
-	return res, nil
+	return responses, nil
 }
 
-func (s *Server) handleRPC(_ *Request, _ *Response) error {
-	return nil // TODO: not implemented
+// handleRPC handles a single request.
+func (s *Server) handleRPC(req *Request, res *Response) {
+	id := req.ID // Copy ID.
+	res.ID = &id // Make response ID the same as the request ID.
+
+	res.JSONRPC = JsonRPCVersion // Must be "2.0" for all JSON-RPC 2.0 messages.
+
+	paramsT, err := s.registry.MethodParamsType(req.Method)
+	if errors.Is(err, ErrMethodNotFound) {
+		methodNotFound(req.Method, res)
+
+		return
+	} else if err != nil {
+		internalError(nil, res) // Don't expose internal errors.
+
+		return
+	}
+
+	params, err := parse.ParamsType(paramsT, *req.Params) // Parse params.
+	if err != nil {
+		internalError(nil, res)
+
+		return
+	}
+
+	result, err := s.registry.Call(req.Method, params) // Call method.
+
+	if errors.Is(err, ErrMethodNotFound) {
+		methodNotFound(req.Method, res)
+
+		return
+	} else if err != nil {
+		internalError(nil, res)
+
+		return
+	}
+
+	res.Result = result // Set result.
 }

@@ -29,6 +29,20 @@ type Register interface {
 	Register(method string, handler any) error
 }
 
+// Caller defines the method to call a handler.
+type Caller interface {
+	Call(method string, params any) (any, error)
+}
+
+// MethodRegister defines the method to register a handler and call it.
+type MethodRegister interface {
+	Register
+	Caller
+
+	// MethodParamsType returns the type of the method's arguments type.
+	MethodParamsType(method string) (reflect.Type, error)
+}
+
 // Registry registers handlers and calls them. Implements the Register interface.
 // Is safe for concurrent use.
 type Registry struct {
