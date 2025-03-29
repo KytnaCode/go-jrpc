@@ -23,18 +23,14 @@ var (
 func ParseParams[T any](params []byte) (T, error) {
 	t := reflect.TypeFor[T]()
 
-	// Custom unmarshaler for the params.
-	pw := paramsWrapper{
-		t: t,
-	}
-
-	if err := json.Unmarshal(params, &pw); err != nil {
-		zero, _ := reflect.Zero(t).Interface().(T) // return zero value of T
+	v, err := ParseParamsType(t, params)
+	if err != nil {
+		zero, _ := v.(T) // Safe to convert.
 
 		return zero, err
 	}
 
-	value, _ := pw.value.(T) // pw.value always has the type T.
+	value, _ := v.(T) // Safe to convert.
 
 	return value, nil
 }
@@ -55,6 +51,23 @@ func (pw *paramsWrapper) UnmarshalJSON(b []byte) error {
 	} else { // invalid
 		return fmt.Errorf("parameters must be an array or an object: %w", ErrInvalidParams)
 	}
+}
+
+func ParseParamsType(t reflect.Type, params []byte) (any, error) {
+	if t.Kind() != reflect.Struct {
+		return reflect.Zero(t).Interface(), fmt.Errorf("params must be a struct: %w", ErrInvalidParams)
+	}
+
+	// Custom unmarshaler for the params.
+	pw := paramsWrapper{
+		t: t,
+	}
+
+	if err := json.Unmarshal(params, &pw); err != nil {
+		return reflect.Zero(t).Interface(), err
+	}
+
+	return pw.value, nil
 }
 
 // parsePositional parses the params when they are an array.
