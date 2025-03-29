@@ -54,8 +54,9 @@ func Params[T any](params []byte) (T, error) {
 }
 
 func ParamsType(t reflect.Type, params []byte) (any, error) {
-	if t.Kind() != reflect.Struct {
-		return reflect.Zero(t).Interface(), fmt.Errorf("params must be a struct: %w", ErrInvalidParams)
+	// Check if the params are a struct or a pointer to a struct.
+	if t.Kind() != reflect.Struct && !(t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct) {
+		return reflect.Zero(t).Interface(), fmt.Errorf("params must be a struct or a pointer: %w", ErrInvalidParams)
 	}
 
 	// Custom unmarshaler for the params.
@@ -82,16 +83,30 @@ func (pw *paramsWrapper) parsePositional(b []byte) error {
 
 	params := reflect.New(pw.t) // Output params.
 
-	for i := range pw.t.NumField() {
+	var structT reflect.Type
+
+	// t is guaranteed to be a struct or a pointer to a struct.
+	if pw.t.Kind() == reflect.Struct {
+		structT = pw.t
+	} else { // Pointer to struct.
+		structT = pw.t.Elem()
+		params.Elem().Set(reflect.New(structT))
+	}
+
+	for i := range structT.NumField() {
 		// Unmarshal the field.
-		field := reflect.New(pw.t.Field(i).Type)
+		field := reflect.New(structT.Field(i).Type)
 
 		if err := dec.Decode(field.Interface()); err != nil {
 			return err
 		}
 
 		// Set the field.
-		params.Elem().Field(i).Set(field.Elem())
+		if params.Elem().Kind() == reflect.Struct { // Struct.
+			params.Elem().Field(i).Set(field.Elem())
+		} else { // Pointer to struct.
+			params.Elem().Elem().Field(i).Set(field.Elem())
+		}
 	}
 
 	if dec.More() {

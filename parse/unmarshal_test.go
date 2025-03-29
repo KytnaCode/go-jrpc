@@ -59,6 +59,46 @@ func TestParseParams_ValidParams(t *testing.T) {
 	}
 }
 
+func TestParseParams_ValidPointerParams(t *testing.T) {
+	t.Parallel()
+
+	type data struct {
+		params   []byte
+		expected args
+	}
+
+	const (
+		name  = "john"
+		last  = "doe"
+		age   = 30
+		email = "john.doe@example.com"
+	)
+
+	testData := map[string]data{
+		"array": {
+			params:   fmt.Appendf(nil, `["%v", "%v", %v, { "email": "%v" }]`, name, last, age, email),
+			expected: args{Name: name, Last: last, Age: age, Nested: nested{Email: email}},
+		},
+		"object": {
+			params:   fmt.Appendf(nil, `{"name": "%v", "last": "%v", "age": %v, "nested": { "email": "%v" }}`, name, last, age, email),
+			expected: args{Name: name, Last: last, Age: age, Nested: nested{Email: email}},
+		},
+	}
+
+	for name, data := range testData {
+		t.Run(name, func(t *testing.T) {
+			got, err := parse.Params[*args](data.params)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			if *got != data.expected {
+				t.Errorf("expected %v, got %v", data.expected, got)
+			}
+		})
+	}
+}
+
 func TestParseParams_InvalidParams(t *testing.T) {
 	t.Parallel()
 
@@ -221,6 +261,43 @@ func TestParseParamsType_InvalidParams(t *testing.T) {
 			// Replace `name` field to not trigger extra parameters error, we want to test the unknown field error.
 			params: fmt.Appendf(nil, `{"unknown": "unknown", "last": "%v", "age": %v, "nested": { "email": "%v" }}`, last, age, email),
 			t:      reflect.TypeFor[args](),
+		},
+	}
+
+	for name, data := range testData {
+		t.Run(name, func(t *testing.T) {
+			_, err := parse.ParamsType(data.t, data.params)
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestParseParamsType_NonStructOrPointerToStruct(t *testing.T) {
+	t.Parallel()
+
+	type data struct {
+		params []byte
+		t      reflect.Type
+	}
+
+	testData := map[string]data{
+		"int": {
+			params: []byte(`1`),
+			t:      reflect.TypeFor[int](),
+		},
+		"string": {
+			params: []byte(`"string"`),
+			t:      reflect.TypeFor[string](),
+		},
+		"array": {
+			params: []byte(`["hello", "world"]`),
+			t:      reflect.TypeFor[[]string](),
+		},
+		"object": {
+			params: []byte(`{ "hello": "world" }`),
+			t:      reflect.TypeFor[map[string]string](),
 		},
 	}
 
