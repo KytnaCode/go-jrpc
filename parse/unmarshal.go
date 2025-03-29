@@ -65,7 +65,7 @@ func ParamsType(t reflect.Type, params []byte) (any, error) {
 	}
 
 	if err := json.Unmarshal(params, &pw); err != nil {
-		return reflect.Zero(t).Interface(), err
+		return reflect.Zero(t).Interface(), fmt.Errorf("error unmarshaling params: %w: %w", ErrInvalidParams, err)
 	}
 
 	return pw.value, nil
@@ -97,8 +97,12 @@ func (pw *paramsWrapper) parsePositional(b []byte) error {
 		// Unmarshal the field.
 		field := reflect.New(structT.Field(i).Type)
 
+		if !dec.More() {
+			return fmt.Errorf("missing parameters in array: %w", ErrInvalidParams)
+		}
+
 		if err := dec.Decode(field.Interface()); err != nil {
-			return err
+			return fmt.Errorf("error decoding field %q: %w: %w", structT.Field(i).Name, ErrInvalidParams, err)
 		}
 
 		// Set the field.
@@ -133,7 +137,7 @@ func (pw *paramsWrapper) parseNamed(b []byte) error {
 
 	// Unmarshal the object.
 	if err := dec.Decode(params.Interface()); err != nil {
-		return err
+		return fmt.Errorf("error decoding object: %w: %w", ErrInvalidParams, err)
 	}
 
 	pw.value = params.Elem().Interface()
