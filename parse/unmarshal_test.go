@@ -59,6 +59,46 @@ func TestParseParams_ValidParams(t *testing.T) {
 	}
 }
 
+func TestParseParams_ValidPointerParams(t *testing.T) {
+	t.Parallel()
+
+	type data struct {
+		params   []byte
+		expected args
+	}
+
+	const (
+		name  = "john"
+		last  = "doe"
+		age   = 30
+		email = "john.doe@example.com"
+	)
+
+	testData := map[string]data{
+		"array": {
+			params:   fmt.Appendf(nil, `["%v", "%v", %v, { "email": "%v" }]`, name, last, age, email),
+			expected: args{Name: name, Last: last, Age: age, Nested: nested{Email: email}},
+		},
+		"object": {
+			params:   fmt.Appendf(nil, `{"name": "%v", "last": "%v", "age": %v, "nested": { "email": "%v" }}`, name, last, age, email),
+			expected: args{Name: name, Last: last, Age: age, Nested: nested{Email: email}},
+		},
+	}
+
+	for name, data := range testData {
+		t.Run(name, func(t *testing.T) {
+			got, err := parse.Params[*args](data.params)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			if *got != data.expected {
+				t.Errorf("expected %v, got %v", data.expected, got)
+			}
+		})
+	}
+}
+
 func TestParseParams_InvalidParams(t *testing.T) {
 	t.Parallel()
 
