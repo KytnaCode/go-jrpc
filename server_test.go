@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -193,5 +195,149 @@ func TestServer_ServeConnShouldCloseConn(t *testing.T) {
 
 	if !conn.closed {
 		t.Fatalf("expected connection to be closed")
+	}
+}
+
+func TestServer_ServeHTTPInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	const invalidJSON = `{"jsonrpc": "2.0", "method": "foo", "params": "bar", "id": 1` // missing closing brace
+
+	r := strings.NewReader(invalidJSON)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPValidBatch(t *testing.T) {
+	t.Parallel()
+
+	// A valid batch request.
+	const batch = `[
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1 },
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 2 },
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 3 }
+	]`
+
+	r := strings.NewReader(batch)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPInvalidBatch(t *testing.T) {
+	t.Parallel()
+
+	// An invalid batch request.
+	const batch = `[
+	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1 }
+	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 2 }
+		]` // missing comma between the two requests.
+
+	r := strings.NewReader(batch)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPValidSingle(t *testing.T) {
+	t.Parallel()
+
+	// A valid single request.
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPInvalidSingle(t *testing.T) {
+	t.Parallel()
+
+	// An invalid single request.
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": , "id": 1}` // params have no value.
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPNonObjectNonBatch(t *testing.T) {
+	t.Parallel()
+
+	// A non-object, non-batch request.
+	const request = `5` // A number.
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
 	}
 }

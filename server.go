@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +14,10 @@ import (
 const (
 	JsonRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
 	ParseError     = -32700
+)
+
+var (
+	ErrParse = errors.New("failed to parse JSON-RPC message")
 )
 
 type Server struct {
@@ -75,61 +80,121 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 				continue
 			}
 
-			trimmedMsg := bytes.TrimLeft(msg, " \t\n") // Trim leading whitespace.
-			if len(trimmedMsg) == 0 {
-				s.errorLog("empty message received")
+			res, batch, err := s.handleMessage(&msg) // Handle message.
+			if err != nil {
+				if err := enc.Encode(parseError(err)); err != nil {
+					s.errorLog("failed to encode parse error: %v", err)
+				}
+			}
+
+			// If no responses, don't write anything at all.
+			if len(res) == 0 {
 				continue
 			}
-			firstByte := trimmedMsg[0] // First non-whitespace byte.
-			if firstByte == '[' { // Batch request.
-				res, err := s.handleBatchRPC(&msg)
-				if err != nil {
-					s.errorLog("failed to handle batch RPC: %v", err)
-					continue
-				}
 
+			if batch {
+				// For batch requests always encode responses as a batch although there is only one response.
 				if err := enc.Encode(res); err != nil {
+					s.errorLog("failed to encode batch response: %v", err)
+				}
+			} else {
+				if err := enc.Encode(res[0]); err != nil {
 					s.errorLog("failed to encode response: %v", err)
 				}
-
-				continue
-			}
-
-			if firstByte == '{' { // Single request.
-				var req Request
-				if err := json.Unmarshal(msg, &req); err != nil {
-					// Send parse error response.
-					s.errorLog("failed to unmarshal request: %v", err)
-
-					if err := enc.Encode(parseError(err)); err != nil {
-						s.errorLog("failed to encode response: %v", err)
-
-						continue
-					}
-				}
-
-				var res Response
-				if err := s.handleRPC(&req, &res); err != nil {
-					s.errorLog("failed to handle RPC: %v", err)
-					continue
-				}
-
-				if err := enc.Encode(res); err != nil {
-					s.errorLog("failed to encode response: %v", err)
-				}
-
-				continue
-			}
-
-			if err := enc.Encode(parseError(nil)); err != nil {
-				s.errorLog("failed to encode response: %v", err)
 			}
 		}
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
+// Return a 400 status code if a parse error occurs.
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	panic("not implemented")
+	dec := json.NewDecoder(req.Body)
+	enc := json.NewEncoder(w)
+
+	var msg json.RawMessage // Raw JSON-RPC message.
+
+	if err := dec.Decode(&msg); err != nil {
+		s.errorLog("failed to decode message: %v", err)
+
+		w.WriteHeader(http.StatusBadRequest)
+		if err := enc.Encode(parseError(err)); err != nil {
+			s.errorLog("failed to encode parse error: %v", err)
+		}
+
+		return
+	}
+
+	res, batch, err := s.handleMessage(&msg) // Handle message.
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest) // Parse error.
+		if err := enc.Encode(parseError(err)); err != nil {
+			s.errorLog("failed to encode parse error: %v", err)
+		}
+
+		return
+	}
+
+	// If no responses, don't write anything at all.
+	if len(res) == 0 {
+		return
+	}
+
+	if batch {
+		// For batch requests always encode responses as a batch although there is only one response.
+		if err := enc.Encode(res); err != nil {
+			s.errorLog("failed to encode batch response: %v", err)
+		}
+	} else {
+		// Parse errors on batch requests are replied as a non-batch response.
+		if res[0].Error != nil && res[0].Error.Code == ParseError {
+			w.WriteHeader(http.StatusBadRequest) // Parse error.
+		}
+
+		if err := enc.Encode(res[0]); err != nil {
+			s.errorLog("failed to encode response: %v", err)
+		}
+	}
+}
+
+// handleMessage takes a raw JSON-RPC message and returns the response(s) to it, return whether it's a batch request or not,
+// if not a batch request, the response slice will contain at most one element, if there isn't any response, the slice will be empty.
+// Caller must handle the case where the response slice is empty.
+// If an error occurs responses slice will be nil and batch will be false.
+func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool, err error) {
+	trimmedMsg := bytes.TrimLeft(*msg, " \t\n") // Trim leading whitespace.
+	if len(trimmedMsg) == 0 {
+		return nil, false, errors.New("empty message received")
+	}
+	firstByte := trimmedMsg[0] // First non-whitespace byte.
+
+	if firstByte == '[' { // Batch request.
+		res, err := s.handleBatchRPC(msg)
+		if errors.Is(err, ErrParse) {
+			return []Response{*parseError(err)}, false, nil // Parse error must be replied as a non-batch response.
+		} else if err != nil {
+			return nil, false, err
+		}
+
+		return res, true, nil
+	}
+
+	if firstByte == '{' { // Single request.
+		var req Request
+		if err := json.Unmarshal(*msg, &req); err != nil {
+			// Send parse error response.
+			return []Response{*parseError(err)}, false, nil
+		}
+
+		var res Response
+		if err := s.handleRPC(&req, &res); err != nil {
+			return nil, false, err
+		}
+
+		return []Response{res}, false, nil
+	}
+
+	return []Response{*parseError(nil)}, false, nil
 }
 
 // parseError returns a JSON-RPC response with a parse error.
@@ -161,7 +226,7 @@ func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 	var reqs []Request // Batch of requests.
 
 	if err := json.Unmarshal(*msg, &reqs); err != nil { // Unmarshal batch of requests.
-		return nil, err
+		return nil, ErrParse
 	}
 
 	resCh := make(chan result, len(reqs)) // Channel of results.
