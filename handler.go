@@ -29,6 +29,20 @@ type Register interface {
 	Register(method string, handler any) error
 }
 
+// Caller defines the method to call a handler.
+type Caller interface {
+	Call(method string, params any) (any, error)
+}
+
+// MethodRegister defines the method to register a handler and call it.
+type MethodRegister interface {
+	Register
+	Caller
+
+	// MethodParamsType returns the type of the method's arguments type.
+	MethodParamsType(method string) (reflect.Type, error)
+}
+
 // Registry registers handlers and calls them. Implements the Register interface.
 // Is safe for concurrent use.
 type Registry struct {
@@ -79,6 +93,16 @@ func (r *Registry) Register(method string, handler any) error {
 	r.handlers.Store(method, handler)
 
 	return nil
+}
+
+// MethodParamsType returns the type of the method's arguments type.
+func (r *Registry) MethodParamsType(method string) (reflect.Type, error) {
+	handler, ok := r.handlers.Load(method)
+	if !ok {
+		return nil, fmt.Errorf("method %q not found: %w", method, ErrMethodNotFound)
+	}
+
+	return reflect.TypeOf(handler).In(handlerParamsIndex), nil
 }
 
 // validateHandler checks handler type.
