@@ -437,3 +437,55 @@ func TestServer_ServeHTTPShouldReturnABatchOfResponsesExcludingNotifications(t *
 		t.Fatalf("expected %d responses, got %d", expectedRequests, len(res))
 	}
 }
+
+func TestServer_ServeHTTPShouldNotPanicWithNilParams(t *testing.T) {
+	t.Parallel()
+
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": null, "id": 1}`
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	if err := s.Register("foo", func(args, reply *struct{}) error { return nil }); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestServer_ServeHTTPShouldNotPanicWithoutParams(t *testing.T) {
+	t.Parallel()
+
+	const request = `{"jsonrpc": "2.0", "method": "foo", "id": 1}`
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	if err := s.Register("foo", func(args, reply *struct{}) error { return nil }); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+}
