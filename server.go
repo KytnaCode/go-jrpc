@@ -160,7 +160,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // handleMessage takes a raw JSON-RPC message and returns the response(s) to it, return whether it's a batch request or not,
 // if not a batch request, the response slice will contain at most one element, if there isn't any response, the slice will be empty.
 // Caller must handle the case where the response slice is empty.
-// If an error ocurrs responses slice will be nil and batch will be false.
+// If an error occurs responses slice will be nil and batch will be false.
 func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool, err error) {
 	trimmedMsg := bytes.TrimLeft(*msg, " \t\n") // Trim leading whitespace.
 	if len(trimmedMsg) == 0 {
