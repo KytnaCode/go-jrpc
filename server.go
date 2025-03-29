@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,12 +17,14 @@ import (
 const (
 	JsonRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
 	ParseError     = -32700
+	InvalidRequest = -32600
 	MethodNotFound = -32601
 	InternalError  = -32603
 )
 
 var (
-	ErrParse = errors.New("failed to parse JSON-RPC message")
+	ErrParse          = errors.New("failed to parse JSON-RPC message")
+	ErrInvalidRequest = errors.New("invalid JSON-RPC request")
 )
 
 type Server struct {
@@ -158,8 +161,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	} else {
 		// Parse errors on batch requests are replied as a non-batch response.
-		if res[0].Error != nil && res[0].Error.Code == ParseError {
-			w.WriteHeader(http.StatusBadRequest) // Parse error.
+		if errObj := res[0].Error; errObj != nil {
+			if errObj.Code == ParseError {
+				w.WriteHeader(http.StatusBadRequest) // Parse error.
+			}
+
+			if errObj.Code == InvalidRequest {
+				w.WriteHeader(http.StatusBadRequest) // Invalid request.
+			}
+
+			if errObj.Code == MethodNotFound {
+				w.WriteHeader(http.StatusNotFound) // Method not found.
+			}
+
+			if errObj.Code == InternalError {
+				w.WriteHeader(http.StatusInternalServerError) // Internal error.
+			}
 		}
 
 		if err := enc.Encode(res[0]); err != nil {
@@ -223,6 +240,11 @@ func parseError(err error) *Response {
 	rpcError(ParseError, "Parse error", data, res)
 
 	return res
+}
+
+// invalidRequest sets response's error to an invalid request error. data may be nil.
+func invalidRequest(data any, res *Response) {
+	rpcError(InvalidRequest, "Invalid request", data, res)
 }
 
 // internalError sets response's error to an internal error. data may be nil.
@@ -296,6 +318,16 @@ func (s *Server) handleRPC(req *Request, res *Response) {
 		res.ID = req.ID // Set response ID.
 	}
 
+	if err := validateRequest(req); errors.Is(err, ErrInvalidRequest) {
+		invalidRequest(err, res) // validateRequest don't expose internal errors.
+
+		return
+	} else if err != nil {
+		internalError(err, res) // validateRequest don't expose internal errors.
+
+		return
+	}
+
 	res.JSONRPC = JsonRPCVersion // Must be "2.0" for all JSON-RPC 2.0 messages.
 
 	paramsT, err := s.registry.MethodParamsType(req.Method)
@@ -337,4 +369,21 @@ func (s *Server) handleRPC(req *Request, res *Response) {
 	}
 
 	res.Result = result // Set result.
+}
+
+// validateRequest validates a request. Returns an ErrInvalidRequest error if the request is invalid.
+// Don't check for the method existence, it's the responsibility of the caller.
+// Don't validate the params, it's the responsibility of the caller.
+// Only allow JSON-RPC 2.0 messages.
+// Don't expose internal errors.
+func validateRequest(req *Request) error {
+	if req.JSONRPC != JsonRPCVersion {
+		return fmt.Errorf("only JSON-RPC %q is supported, got %v: %w", JsonRPCVersion, req.JSONRPC, ErrInvalidRequest)
+	}
+
+	if req.Method == "" {
+		return fmt.Errorf("method is empty: %w", ErrInvalidRequest)
+	}
+
+	return nil
 }
