@@ -8,6 +8,7 @@ type Response struct {
 	Result  any          `json:"result,omitempty"`  // The result of the call, must not be nil on success.
 	Error   *Error       `json:"error,omitempty"`   // The error of the call, must not be nil on failure.
 	ID      *json.Number `json:"id"`                // The request identifier, must match the response identifier.
+	noreply bool         // If true, the response will not be sent.
 }
 
 // Error represents a JSON-RPC error.

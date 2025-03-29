@@ -341,3 +341,99 @@ func TestServer_ServeHTTPNonObjectNonBatch(t *testing.T) {
 		t.Fatalf("expected status code %d, got %d", http.StatusBadRequest, w.Code)
 	}
 }
+
+func TestServer_ServeHTTPShouldNotWriteResponseToASingleNotification(t *testing.T) {
+	t.Parallel()
+
+	// A single notification.
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ]}` // No id.
+
+	r := strings.NewReader(request)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected no response, got %s", w.Body.String())
+	}
+}
+
+func TestServer_ServeHTTPShouldNotWriteResponseToABatchOfNotifications(t *testing.T) {
+	t.Parallel()
+
+	// A batch of notifications.
+	const batch = `[
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ] },
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ] }
+		]` // No id.
+
+	r := strings.NewReader(batch)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected no response, got %s", w.Body.String())
+	}
+
+}
+
+func TestServer_ServeHTTPShouldReturnABatchOfResponsesExcludingNotifications(t *testing.T) {
+	t.Parallel()
+
+	const expectedRequests = 2 // Without notifications.
+
+	// A batch of requests with notifications.
+	const batch = `[
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1 },
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ] },
+		{ "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 2 }
+	]` // One notification and two requests.
+
+	r := strings.NewReader(batch)
+
+	req := &http.Request{
+		Body: io.NopCloser(r),
+	}
+
+	w := httptest.NewRecorder()
+
+	s := jrpc.NewServer(nil)
+
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var res []any
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("expected valid JSON, got %v", err)
+	}
+
+	if len(res) != expectedRequests {
+		t.Fatalf("expected %d responses, got %d", expectedRequests, len(res))
+	}
+}
