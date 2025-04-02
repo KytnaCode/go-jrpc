@@ -1,11 +1,6 @@
 name: Commit
 
-on: 
-  push:
-    branches: 
-      - "feat/*"
-      - "fix/*"
-      - "ref/*"
+on: [push]
 
 jobs:
   test:
