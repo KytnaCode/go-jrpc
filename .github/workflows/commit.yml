@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup go
-        uses: actions/setup-go@5
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
       - name: Run tests
