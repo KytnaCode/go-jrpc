@@ -38,7 +38,7 @@ type Group struct {
 	sep      string // Subgroup separator
 }
 
-// init initializes the group, check if the group is arleady initialized is responsibility of the caller, if g.handlers is nil, the group is not initialized yet.
+// init initializes the group, check if the group is already initialized is responsibility of the caller, if g.handlers is nil, the group is not initialized yet.
 func (g *Group) init() {
 	g.handlers = make(map[string]any)
 	g.sep = DefaultSeparator
