@@ -3,10 +3,13 @@ package jrpc_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kytnacode/go-jrpc"
@@ -14,10 +17,27 @@ import (
 
 // mock io.ReadWriteCloser.
 type ioReadWriteCloser struct {
-	io.Reader
-	io.Writer
+	net.Conn
 
+	r      io.Reader
+	w      io.Writer
 	closed bool
+}
+
+func (ioReadWriteCloser *ioReadWriteCloser) Write(p []byte) (n int, err error) {
+	if ioReadWriteCloser.closed {
+		return 0, errors.New("connection closed")
+	}
+
+	return ioReadWriteCloser.w.Write(p)
+}
+
+func (ioReadWriteCloser *ioReadWriteCloser) Read(p []byte) (n int, err error) {
+	if ioReadWriteCloser.closed {
+		return 0, errors.New("connection closed")
+	}
+
+	return ioReadWriteCloser.r.Read(p)
 }
 
 func (rwc *ioReadWriteCloser) Close() error {
@@ -27,7 +47,19 @@ func (rwc *ioReadWriteCloser) Close() error {
 }
 
 func newIOReadWriteCloser(r io.Reader, w io.Writer) *ioReadWriteCloser {
-	return &ioReadWriteCloser{r, w, false}
+	return &ioReadWriteCloser{r: r, w: w, closed: false, Conn: nil}
+}
+
+type listener struct {
+	net.Listener
+}
+
+// Accept waits for and returns the next connection to the listener.
+func (listener *listener) Accept() (net.Conn, error) {
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
+	r := strings.NewReader(request)
+
+	return newIOReadWriteCloser(r, io.Discard), nil
 }
 
 func TestServer_ServeConnInvalidJSON(t *testing.T) {
@@ -196,6 +228,35 @@ func TestServer_ServeConnShouldCloseConn(t *testing.T) {
 	if !conn.closed {
 		t.Fatalf("expected connection to be closed")
 	}
+}
+
+func TestServer_ServeConnShouldBeSafeForConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	// A valid single request.
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
+
+	s := jrpc.NewServer(nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 10
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+
+	for range n {
+		go func() {
+			conn := newIOReadWriteCloser(strings.NewReader(request), io.Discard)
+			s.ServeConn(ctx, conn)
+			wg.Done()
+		}()
+	}
+
+	cancel()
+
+	wg.Wait()
 }
 
 func TestServer_ServeHTTPInvalidJSON(t *testing.T) {
@@ -561,5 +622,156 @@ func TestServer_ServeHTTPEmptyMethodShouldReturnBadRequest(t *testing.T) {
 
 	if res.Error.Code != jrpc.InvalidRequest {
 		t.Fatalf("expected error code %d, got %d", jrpc.InvalidRequest, res.Error.Code)
+	}
+}
+
+func TestServer_ServeHTTPShouldBeSafeForConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
+
+	s := jrpc.NewServer(nil)
+
+	const n = 10
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+
+	for range n {
+		go func() {
+			r := strings.NewReader(request)
+
+			req := &http.Request{
+				Body: io.NopCloser(r),
+			}
+
+			w := httptest.NewRecorder()
+
+			s.ServeHTTP(w, req)
+
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestServer_AcceptShouldBeSafeForConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 10
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+
+	errCh := make(chan error)
+
+	for range n {
+		go func() {
+			l := &listener{}
+
+			s := jrpc.NewServer(nil)
+
+			err := s.Accept(ctx, l)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				errCh <- err
+			}
+
+			wg.Done()
+		}()
+	}
+
+	cancel() // Cancel the context to stop the servers.
+
+	doneCh := make(chan struct{})
+
+	go func() {
+		wg.Wait()
+
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case err := <-errCh:
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestServerShouldServerOverHTTPAndConnectionAndListenerConcurrenlty(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 10
+	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
+
+	var wg sync.WaitGroup
+	wg.Add(n * 3)
+
+	errCh := make(chan error)
+
+	for range n {
+		go func() {
+			l := &listener{}
+
+			s := jrpc.NewServer(nil)
+
+			err := s.Accept(ctx, l)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				errCh <- err
+			}
+
+			wg.Done()
+		}()
+
+		go func() {
+			r := strings.NewReader(request)
+
+			conn := newIOReadWriteCloser(r, io.Discard)
+
+			s := jrpc.NewServer(nil)
+
+			s.ServeConn(ctx, conn)
+
+			wg.Done()
+		}()
+
+		go func() {
+			r := strings.NewReader(request)
+
+			req := &http.Request{
+				Body: io.NopCloser(r),
+			}
+
+			w := httptest.NewRecorder()
+
+			s := jrpc.NewServer(nil)
+
+			s.ServeHTTP(w, req)
+
+			wg.Done()
+		}()
+	}
+
+	cancel() // Cancel the context to stop the servers.
+
+	// Wait for all goroutines to finish.
+	doneCh := make(chan struct{})
+
+	go func() {
+		wg.Wait()
+
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+	case err := <-errCh:
+		t.Fatalf("expected no error, got %v", err)
 	}
 }
