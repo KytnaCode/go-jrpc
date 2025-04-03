@@ -24,20 +24,20 @@ type ioReadWriteCloser struct {
 	closed bool
 }
 
-func (ioReadWriteCloser *ioReadWriteCloser) Write(p []byte) (n int, err error) {
-	if ioReadWriteCloser.closed {
-		return 0, errors.New("connection closed")
+func (rwc *ioReadWriteCloser) Write(p []byte) (n int, err error) {
+	if rwc.closed {
+		return 0, errors.New("connection closed") //nolint:err113
 	}
 
-	return ioReadWriteCloser.w.Write(p)
+	return rwc.w.Write(p) //nolint:wrapcheck
 }
 
-func (ioReadWriteCloser *ioReadWriteCloser) Read(p []byte) (n int, err error) {
-	if ioReadWriteCloser.closed {
-		return 0, errors.New("connection closed")
+func (rwc *ioReadWriteCloser) Read(p []byte) (n int, err error) {
+	if rwc.closed {
+		return 0, errors.New("connection closed") //nolint:err113
 	}
 
-	return ioReadWriteCloser.r.Read(p)
+	return rwc.r.Read(p) //nolint:wrapcheck
 }
 
 func (rwc *ioReadWriteCloser) Close() error {
@@ -72,7 +72,9 @@ func TestServer_ServeConnInvalidJSON(t *testing.T) {
 	conn := newIOReadWriteCloser(strings.NewReader(invalidJSON), w)
 
 	testSucceedc := make(chan struct{}) // Expect request to fail
-	testFailc := make(chan error)       // Test will fail if the request succeeds or an error occurs.
+	testFailc := make(
+		chan error,
+	) // Test will fail if the request succeeds or an error occurs.
 
 	errorLog := func(string, ...any) {
 		testSucceedc <- struct{}{} // Error log should be called.
@@ -127,12 +129,15 @@ func TestServer_ServeConnInvalidBatch(t *testing.T) {
 	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1 }
 	  { "jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 2 }
 		]` // missing comma between the two requests.
+
 	r, w := io.Pipe() // Create a pipe to simulate a connection.
 
 	conn := newIOReadWriteCloser(strings.NewReader(batch), w)
 
 	testSucceedc := make(chan struct{}) // Expect request to fail.
-	testFailc := make(chan error)       // Test will fail if the request succeeds or an error occurs.
+	testFailc := make(
+		chan error,
+	) // Test will fail if the request succeeds or an error occurs.
 
 	errorLog := func(string, ...any) {
 		testSucceedc <- struct{}{} // Error log should be called.
@@ -187,7 +192,9 @@ func TestServer_ServeConnInvalidSingle(t *testing.T) {
 	conn := newIOReadWriteCloser(strings.NewReader(request), w)
 
 	testSucceedc := make(chan struct{}) // Expect request to fail.
-	testFailc := make(chan error)       // Test will fail if the request succeeds or an error occurs.
+	testFailc := make(
+		chan error,
+	) // Test will fail if the request succeeds or an error occurs.
 
 	errorLog := func(string, ...any) {
 		testSucceedc <- struct{}{} // Error log should be called.
@@ -244,6 +251,7 @@ func TestServer_ServeConnShouldBeSafeForConcurrentUse(t *testing.T) {
 	const n = 10
 
 	var wg sync.WaitGroup
+
 	wg.Add(n)
 
 	for range n {
@@ -350,7 +358,7 @@ func TestServer_ServeHTTPValidSingle(t *testing.T) {
 
 	s := jrpc.NewServer(nil)
 
-	if err := s.Register("foo", func(args, reply *struct{}) error { return nil }); err != nil {
+	if err := s.Register("foo", func(_, _ *struct{}) error { return nil }); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 
@@ -462,7 +470,6 @@ func TestServer_ServeHTTPShouldNotWriteResponseToABatchOfNotifications(t *testin
 	if w.Body.Len() != 0 {
 		t.Fatalf("expected no response, got %s", w.Body.String())
 	}
-
 }
 
 func TestServer_ServeHTTPShouldReturnABatchOfResponsesExcludingNotifications(t *testing.T) {
@@ -518,7 +525,7 @@ func TestServer_ServeHTTPShouldNotPanicWithNilParams(t *testing.T) {
 
 	s := jrpc.NewServer(nil)
 
-	if err := s.Register("foo", func(args, reply *struct{}) error { return nil }); err != nil {
+	if err := s.Register("foo", func(_, _ *struct{}) error { return nil }); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 
@@ -544,7 +551,7 @@ func TestServer_ServeHTTPShouldNotPanicWithoutParams(t *testing.T) {
 
 	s := jrpc.NewServer(nil)
 
-	if err := s.Register("foo", func(args, reply *struct{}) error { return nil }); err != nil {
+	if err := s.Register("foo", func(_, _ *struct{}) error { return nil }); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 
@@ -555,6 +562,9 @@ func TestServer_ServeHTTPShouldNotPanicWithoutParams(t *testing.T) {
 	}
 }
 
+// Prefer DAMP over DRY.
+//
+//nolint:dupl
 func TestServer_ServeHTTPMissingJSONRPCVersion(t *testing.T) {
 	t.Parallel()
 
@@ -590,6 +600,9 @@ func TestServer_ServeHTTPMissingJSONRPCVersion(t *testing.T) {
 	}
 }
 
+// Prefer DAMP over DRY.
+//
+//nolint:dupl
 func TestServer_ServeHTTPEmptyMethodShouldReturnBadRequest(t *testing.T) {
 	t.Parallel()
 
@@ -635,6 +648,7 @@ func TestServer_ServeHTTPShouldBeSafeForConcurrentUse(t *testing.T) {
 	const n = 10
 
 	var wg sync.WaitGroup
+
 	wg.Add(n)
 
 	for range n {
@@ -665,6 +679,7 @@ func TestServer_AcceptShouldBeSafeForConcurrentUse(t *testing.T) {
 	const n = 10
 
 	var wg sync.WaitGroup
+
 	wg.Add(n)
 
 	errCh := make(chan error)
@@ -708,9 +723,11 @@ func TestServerShouldServeOverHTTPAndConnectionAndListenerConcurrently(t *testin
 	defer cancel()
 
 	const n = 10
+
 	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
 
 	var wg sync.WaitGroup
+
 	wg.Add(n * 3)
 
 	errCh := make(chan error)

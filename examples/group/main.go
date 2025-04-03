@@ -19,29 +19,35 @@ type Reply struct {
 
 func echo(args Args, reply *Reply) error {
 	reply.C = args.A
+
 	return nil
 }
 
 func add(args Args, reply *Reply) error {
 	reply.C = args.A + args.B
+
 	return nil
 }
 
 func sub(args Args, reply *Reply) error {
 	reply.C = args.A - args.B
+
 	return nil
 }
 
 func mul(args Args, reply *Reply) error {
 	reply.C = args.A * args.B
+
 	return nil
 }
 
 func div(args Args, reply *Reply) error {
 	if args.B == 0 {
-		return errors.New("division by zero")
+		return errors.New("division by zero") //nolint:err113
 	}
+
 	reply.C = args.A / args.B
+
 	return nil
 }
 
@@ -64,6 +70,7 @@ func main() {
 		for _, err := range errs {
 			log.Println(err)
 		}
+
 		return
 	}
 
@@ -71,5 +78,5 @@ func main() {
 	mux.Handle("/rpc", s)
 
 	log.Println("Server started at :8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", mux)) //nolint:gosec
 }

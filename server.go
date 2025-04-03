@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	JsonRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
+	JSONRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
 	ParseError     = -32700
 	InvalidRequest = -32600
 	MethodNotFound = -32601
@@ -26,6 +26,7 @@ const (
 var (
 	ErrParse          = errors.New("failed to parse JSON-RPC message")
 	ErrInvalidRequest = errors.New("invalid JSON-RPC request")
+	ErrEmptyRequest   = errors.New("empty JSON-RPC request")
 )
 
 type Server struct {
@@ -48,7 +49,11 @@ func (s *Server) SetRegistry(registry MethodRegister) {
 
 // Register registers a method with the server. Implements the Register interface.
 func (s *Server) Register(method string, handler any) error {
-	return s.registry.Register(method, handler)
+	if s.registry.Register(method, handler) != nil {
+		return fmt.Errorf("failed to register method %q: %w", method, ErrInvalidHandlerType)
+	}
+
+	return nil
 }
 
 func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
@@ -58,12 +63,13 @@ func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("accepting connections cancelled: %w", ctx.Err())
 		default:
 			conn, err := lis.Accept()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to accept connection: %w", err)
 			}
+
 			go s.ServeConn(ctx, conn)
 		}
 	}
@@ -92,6 +98,7 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 				return
 			} else if err != nil { // Decode error.
 				s.errorLog("failed to decode message: %v", err)
+
 				continue
 			}
 
@@ -133,6 +140,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		s.errorLog("failed to decode message: %v", err)
 
 		w.WriteHeader(http.StatusBadRequest)
+
 		if err := enc.Encode(parseError(err)); err != nil {
 			s.errorLog("failed to encode parse error: %v", err)
 		}
@@ -143,6 +151,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	res, batch, err := s.handleMessage(&msg) // Handle message.
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest) // Parse error.
+
 		if err := enc.Encode(parseError(err)); err != nil {
 			s.errorLog("failed to encode parse error: %v", err)
 		}
@@ -190,21 +199,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// handleMessage takes a raw JSON-RPC message and returns the response(s) to it, return whether it's a batch request or not,
-// if not a batch request, the response slice will contain at most one element, if there isn't any response, the slice will be empty.
-// Caller must handle the case where the response slice is empty.
-// If an error occurs responses slice will be nil and batch will be false.
+// handleMessage takes a raw JSON-RPC message and returns the response(s) to it, return whether it's a batch request
+// or not, if not a batch request, the response slice will contain at most one element, if there isn't any response,
+// the slice will be empty. Caller must handle the case where the response slice is empty. If an error occurs
+// responses slice will be nil and batch will be false.
 func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool, err error) {
 	trimmedMsg := jsonutil.TrimLeftWhitespace(*msg) // Trim leading whitespace.
 	if len(trimmedMsg) == 0 {
-		return nil, false, errors.New("empty message received")
+		return nil, false, ErrEmptyRequest
 	}
+
 	firstByte := trimmedMsg[0] // First non-whitespace byte.
 
 	if firstByte == '[' { // Batch request.
 		res, err := s.handleBatchRPC(msg)
 		if errors.Is(err, ErrParse) {
-			return []Response{*parseError(err)}, false, nil // Parse error must be replied as a non-batch response.
+			return []Response{
+				*parseError(err),
+			}, false, nil // Parse error must be replied as a non-batch response.
 		} else if err != nil {
 			return nil, false, err
 		}
@@ -220,6 +232,7 @@ func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool
 		}
 
 		var res Response
+
 		s.handleRPC(&req, &res)
 
 		if res.noreply {
@@ -271,8 +284,8 @@ func rpcError(code int, message string, data any, res *Response) {
 	}
 }
 
-// handleBatchRPC handles concurrently a batch of requests, the order of the responses can be different from the order of the requests,
-// the response's ID must be used to match the request's ID.
+// handleBatchRPC handles concurrently a batch of requests, the order of the responses can be different from the order
+// of the requests, the response's ID must be used to match the request's ID.
 func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 	var reqs []Request // Batch of requests.
 
@@ -283,6 +296,7 @@ func (s *Server) handleBatchRPC(msg *json.RawMessage) ([]Response, error) {
 	resCh := make(chan *Response, len(reqs)) // Channel of results.
 
 	var wg sync.WaitGroup
+
 	wg.Add(len(reqs))
 
 	for _, req := range reqs {
@@ -333,7 +347,7 @@ func (s *Server) handleRPC(req *Request, res *Response) {
 		return
 	}
 
-	res.JSONRPC = JsonRPCVersion // Must be "2.0" for all JSON-RPC 2.0 messages.
+	res.JSONRPC = JSONRPCVersion // Must be "2.0" for all JSON-RPC 2.0 messages.
 
 	paramsT, err := s.registry.MethodParamsType(req.Method)
 	if errors.Is(err, ErrMethodNotFound) {
@@ -382,8 +396,13 @@ func (s *Server) handleRPC(req *Request, res *Response) {
 // Only allow JSON-RPC 2.0 messages.
 // Don't expose internal errors.
 func validateRequest(req *Request) error {
-	if req.JSONRPC != JsonRPCVersion {
-		return fmt.Errorf("only JSON-RPC %q is supported, got %v: %w", JsonRPCVersion, req.JSONRPC, ErrInvalidRequest)
+	if req.JSONRPC != JSONRPCVersion {
+		return fmt.Errorf(
+			"only JSON-RPC %q is supported, got %v: %w",
+			JSONRPCVersion,
+			req.JSONRPC,
+			ErrInvalidRequest,
+		)
 	}
 
 	if req.Method == "" {

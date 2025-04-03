@@ -20,30 +20,32 @@ func TestRegistry_RegisterShouldReturnErrorWithInvalidHandler(t *testing.T) {
 			handler: func() error { return nil },
 		},
 		"without reply": {
-			handler: func(args *struct{}) error { return nil },
+			handler: func(_ *struct{}) error { return nil },
 		},
 		"with a non-pointer reply": {
-			handler: func(args, reply struct{}) error { return nil },
+			handler: func(_, _ struct{}) error { return nil },
 		},
 		"with non-struct args": {
-			handler: func(args int, reply *struct{}) error { return nil },
+			handler: func(_ int, _ *struct{}) error { return nil },
 		},
 		"without error": {
-			handler: func(args, reply *struct{}) {},
+			handler: func(_, _ *struct{}) {},
 		},
 		"with multiple return values": {
-			handler: func(args, reply *struct{}) (int, error) { return 0, nil },
+			handler: func(_, _ *struct{}) (int, error) { return 0, nil },
 		},
 		"with multiple return values and non-error": {
-			handler: func(args, reply *struct{}) (int, int) { return 0, 0 },
+			handler: func(_, _ *struct{}) (int, int) { return 0, 0 },
 		},
 		"with non error return": {
-			handler: func(args, reply *struct{}) int { return 0 },
+			handler: func(_, _ *struct{}) int { return 0 },
 		},
 	}
 
 	for name, data := range testData {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			r := jrpc.NewRegistry()
 
 			err := r.Register("method", data.handler)
@@ -110,11 +112,12 @@ func TestRegistry_RegisterShouldBeGoroutineSafe(t *testing.T) {
 	const n = 1000
 
 	var wg sync.WaitGroup
+
 	wg.Add(n)
 
 	for range n {
 		go func() {
-			_ = r.Register("method", func(args, reply *struct{}) error { return nil })
+			_ = r.Register("method", func(_, _ *struct{}) error { return nil })
 
 			wg.Done()
 		}()
@@ -131,6 +134,7 @@ func TestRegistry_CallShouldBeGoroutineSafeWithANonExistingMethod(t *testing.T) 
 	const n = 1000
 
 	var wg sync.WaitGroup
+
 	wg.Add(n)
 
 	for range n {
@@ -149,7 +153,7 @@ func TestRegistry_CallShouldBeGoroutineSafeWithAnExistingMethod(t *testing.T) {
 
 	r := jrpc.NewRegistry()
 
-	err := r.Register("method", func(args, reply *struct{}) error { return nil })
+	err := r.Register("method", func(_, _ *struct{}) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +161,7 @@ func TestRegistry_CallShouldBeGoroutineSafeWithAnExistingMethod(t *testing.T) {
 	const n = 1000
 
 	var wg sync.WaitGroup
+
 	wg.Add(n)
 
 	for range n {
@@ -180,7 +185,7 @@ func TestRegistry_MethodParamsTypeShouldReturnCorrectType(t *testing.T) {
 		Age  int    `json:"age"`
 	}
 
-	err := r.Register("method", func(args *args, reply *struct{}) error { return nil })
+	err := r.Register("method", func(_ *args, _ *struct{}) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
