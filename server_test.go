@@ -701,7 +701,7 @@ func TestServer_AcceptShouldBeSafeForConcurrentUse(t *testing.T) {
 	}
 }
 
-func TestServerShouldServerOverHTTPAndConnectionAndListenerConcurrenlty(t *testing.T) {
+func TestServerShouldServeOverHTTPAndConnectionAndListenerConcurrently(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
