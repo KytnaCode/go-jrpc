@@ -218,7 +218,7 @@ func TestGroup_RegisterToShouldReturnErrors(t *testing.T) {
 	validHandler := func(args, reply *struct{}) error { return nil }
 
 	g.AddMethod(validMethod, validHandler)
-	g.AddMethod(invalidMethod, invalidadHandler)
+	g.AddMethod(invalidMethod, invalidHandler)
 
 	r := &mockRegister{handlers: make(map[string]any)}
 	r.setErr(invalidMethod, errors.New("invalid handler"))
