@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/kytnacode/go-jrpc/jsonutil"
+	"github.com/kytnacode/go-jrpc/internal/jsonutil"
 )
 
 var (
