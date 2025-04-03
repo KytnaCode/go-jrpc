@@ -15,13 +15,21 @@ const (
 )
 
 var (
-	ErrInvalidHandlerType = errors.New("Invalid handler type") // Error returned when the handler is invalid.
-	ErrMethodNotFound     = errors.New("Method not found")     // Error returned when the method is not found.
+	ErrInvalidHandlerType = errors.New(
+		"Invalid handler type",
+	) // Error returned when the handler is invalid.
+	ErrMethodNotFound = errors.New(
+		"Method not found",
+	) // Error returned when the method is not found.
 )
 
 // Register is a type-safe wrapper around Register.Register.
 func RegisterInto[I, O any](r Register, method string, handler func(in I, out *O) error) error {
-	return r.Register(method, handler)
+	if r.Register(method, handler) != nil {
+		return fmt.Errorf("failed to register method %q: %w", method, ErrInvalidHandlerType)
+	}
+
+	return nil
 }
 
 // Register defines the method to register a handler.
@@ -84,9 +92,10 @@ func (r *Registry) Call(method string, params any) (any, error) {
 	return replyV.Interface(), nil
 }
 
-// Register registers a handler for the method. implements the Register interface.
-// The handler must be a function that takes two arguments, the first argument must be a struct or a pointer to a struct,
-// the second argument must be a pointer to a struct, and the handler must return an error.
+// Register registers a handler for the method. implements the Register interface. The handler must be a function that
+// takes two arguments, the first argument must be a struct or a pointer to a struct, the second argument must be a
+// pointer to a struct, and the handler must return an error.
+//
 // Is safe for concurrent use.
 func (r *Registry) Register(method string, handler any) error {
 	handlerT := reflect.TypeOf(handler)
@@ -117,24 +126,46 @@ func validateHandler(handlerT reflect.Type) error {
 	}
 
 	if handlerT.NumIn() != handlerNumIn { // Must take arguments and reply.
-		return fmt.Errorf("handler must take two arguments, got %v: %w", handlerNumIn, ErrInvalidHandlerType)
+		return fmt.Errorf(
+			"handler must take two arguments, got %v: %w",
+			handlerNumIn,
+			ErrInvalidHandlerType,
+		)
 	}
 
 	// Check if the first argument is a struct or a pointer to a struct.
-	if handlerT.In(0).Kind() != reflect.Struct && !(handlerT.In(0).Kind() == reflect.Pointer && handlerT.In(0).Elem().Kind() == reflect.Struct) {
-		return fmt.Errorf("handler's first argument must be a struct or a pointer to a struct, got %v: %w", handlerT.In(0).Kind(), ErrInvalidHandlerType)
+	if handlerT.In(0).Kind() != reflect.Struct &&
+		!(handlerT.In(0).Kind() == reflect.Pointer && handlerT.In(0).Elem().Kind() == reflect.Struct) {
+		return fmt.Errorf(
+			"handler's first argument must be a struct or a pointer to a struct, got %v: %w",
+			handlerT.In(0).Kind(),
+			ErrInvalidHandlerType,
+		)
 	}
 
 	if handlerT.In(1).Kind() != reflect.Pointer { // Must be a pointer.
-		return fmt.Errorf("handler's second argument must be a pointer, got %v: %w", handlerT.In(1).Kind(), ErrInvalidHandlerType)
+		return fmt.Errorf(
+			"handler's second argument must be a pointer, got %v: %w",
+			handlerT.In(1).Kind(),
+			ErrInvalidHandlerType,
+		)
 	}
 
 	if handlerT.NumOut() != handlerNumOut { // Must return an error.
-		return fmt.Errorf("handler must return %v values, got %v: %w", handlerNumOut, handlerT.NumOut(), ErrInvalidHandlerType)
+		return fmt.Errorf(
+			"handler must return %v values, got %v: %w",
+			handlerNumOut,
+			handlerT.NumOut(),
+			ErrInvalidHandlerType,
+		)
 	}
 
 	if !handlerT.Out(0).AssignableTo(reflect.TypeFor[error]()) { // Must return an error.
-		return fmt.Errorf("handler must return an error, got %v: %w", handlerT.Out(0), ErrInvalidHandlerType)
+		return fmt.Errorf(
+			"handler must return an error, got %v: %w",
+			handlerT.Out(0),
+			ErrInvalidHandlerType,
+		)
 	}
 
 	return nil

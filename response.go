@@ -16,7 +16,10 @@ type Error struct {
 	// A number indicating the error type that occurred.
 	// This MUST be an integer.
 	// The error codes from and including -32768 to -32000 are reserved for pre-defined errors.
-	Code    int    `json:"code"`
-	Message string `json:"message"`        // A string providing a short description of the error.
-	Data    any    `json:"data,omitempty"` // A Primitive or Structured value that contains additional information about the error.
+	Code int `json:"code"`
+
+	Message string `json:"message"` // A string providing a short description of the error.
+
+	// A Primitive or Structured value that contains additional information about the error.
+	Data any `json:"data,omitempty"`
 }

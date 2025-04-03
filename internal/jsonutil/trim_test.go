@@ -35,6 +35,8 @@ func TestTrimLeftWhitespace(t *testing.T) {
 
 	for name, data := range testData {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			got := jsonutil.TrimLeftWhitespace(data.input)
 
 			if string(got) != string(data.expected) {

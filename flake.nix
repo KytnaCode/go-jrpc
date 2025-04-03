@@ -25,6 +25,7 @@
             jq # JSON processor
             netcat # Test TCP and UDP connections
             curl # Test HTTP connections
+            golangci-lint # Linter for Go code
           ];
         };
       }

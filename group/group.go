@@ -8,13 +8,14 @@ import "github.com/kytnacode/go-jrpc"
 // DefaultSeparator is the default separator for the subgroups, see [Group.SetSeparator] to use a custom separator.
 const DefaultSeparator = "."
 
-// Group is a group of methods. It allows to add methods with [Group.Register] or [Group.AddMethod] and defer error handling
-// until all methods are registered to another register with [Group.RegisterTo]. It also allows to use nested groups with [Group.Use],
-// nested groups will have a prefix for the methods separated by a separator, defaults to [DefaultSeparator], can be changed with
-// [Group.SetSeparator].
+// Group is a group of methods. It allows to add methods with [Group.Register] or [Group.AddMethod] and defer error
+// handling until all methods are registered to another register with [Group.RegisterTo]. It also allows to use
+// nested groups with [Group.Use], nested groups will have a prefix for the methods separated by a separator,
+// defaults to [DefaultSeparator], can be changed with [Group.SetSeparator].
 //
-// Implements the [jrpc.Register] interface, but if you are using group directly, prefer to use [Group.AddMethod] instead of [Group.Register],
-// as Register will never return an error, errors will be returned all together by [Group.RegisterTo], [Group.AddMethod] is equivalent to [Group.Register].
+// Implements the [jrpc.Register] interface, but if you are using group directly, prefer to use [Group.AddMethod]
+// instead of [Group.Register], as Register will never return an error, errors will be returned all together by
+// [Group.RegisterTo], [Group.AddMethod] is equivalent to [Group.Register].
 //
 // The zero value is ready to use.
 //
@@ -38,13 +39,15 @@ type Group struct {
 	sep      string // Subgroup separator
 }
 
-// init initializes the group, check if the group is already initialized is responsibility of the caller, if g.handlers is nil, the group is not initialized yet.
+// init initializes the group, check if the group is already initialized is responsibility of the caller, if g.handlers
+// is nil, the group is not initialized yet.
 func (g *Group) init() {
 	g.handlers = make(map[string]any)
 	g.sep = DefaultSeparator
 }
 
-// SetSeparator sets the separator from the group from the parent group, and subgroups when using [Group.Use]. Defaults to [DefaultSeparator].
+// SetSeparator sets the separator from the group from the parent group, and subgroups when using [Group.Use].
+// Defaults to [DefaultSeparator].
 func (g *Group) SetSeparator(sep string) {
 	if g.handlers == nil { // if g.handlers is nil, the group is not initialized
 		g.init()
@@ -55,8 +58,8 @@ func (g *Group) SetSeparator(sep string) {
 
 // Register registers a method to the group. Implements the [jrpc.Register] interface.
 //
-// error always returns nil, errors will be returned all together by [Group.RegisterTo], prefer to use [Group.AddMethod] that don't return nothing
-// to avoid confusion:
+// error always returns nil, errors will be returned all together by [Group.RegisterTo], prefer to use
+// [Group.AddMethod] that don't return nothing to avoid confusion:
 //
 //	// _ = g.Register("method", handler)
 //	g.AddMethod("method", handler) // Prefer this
@@ -79,9 +82,10 @@ func (g *Group) AddMethod(method string, handler any) {
 	g.handlers[method] = handler // Defer registering.
 }
 
-// Use add a subgroup of methods to the group. The methods of the subgroup will have a prefix separated by the separator, defaults to [DefaultSeparator],
-// if subgroup calls [Group.SetSeparator] the separator will be changed for the subgroup and all subgroups of the subgroup, if prefix is empty, subgroup
-// methods will be added without prefix nor separator, whether the separator is changed or not:
+// Use add a subgroup of methods to the group. The methods of the subgroup will have a prefix separated by the
+// separator, defaults to [DefaultSeparator], if subgroup calls [Group.SetSeparator] the separator will be changed for
+// the subgroup and all subgroups of the subgroup, if prefix is empty, subgroup methods will be added without prefix
+// nor separator, whether the separator is changed or not:
 //
 //	 g.Use("math", func(subG *group.Group) {
 //	     subG.AddMethod("add", addHandler) // Will be registered as "math.add"
@@ -121,9 +125,9 @@ func (g *Group) Use(prefix string, useG func(subG *Group)) {
 	}
 }
 
-// RegisterTo registers all methods of the group to a [jrpc.Register], returns a slice with all errors ocurred during the registration,
-// is equivalent to call [jrpc.Register.Register] for each method of the group, and append the errors to a slice, and return the slice,
-// to add methods to the group use [Group.AddMethod] or [Group.Register]:
+// RegisterTo registers all methods of the group to a [jrpc.Register], returns a slice with all errors occurred during
+// the registration, is equivalent to call [jrpc.Register.Register] for each method of the group, and append the
+// errors to a slice, and return the slice, to add methods to the group use [Group.AddMethod] or [Group.Register]:
 //
 //	var g group.Group
 //

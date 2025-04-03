@@ -44,13 +44,13 @@ func TestGroup_RegisterShouldNotReturnAnErrorNever(t *testing.T) {
 	testData := map[string]data{
 		// Invalid handlers, Group.Register should not return an error even if the handler is invalid.
 		"without arguments":      {handler: func() error { return nil }},
-		"without error":          {handler: func(args, reply *struct{}) {}},
+		"without error":          {handler: func(_, _ *struct{}) {}},
 		"without args and error": {handler: func() {}},
-		"non-pointer reply":      {handler: func(args, reply struct{}) error { return nil }},
+		"non-pointer reply":      {handler: func(_, _ struct{}) error { return nil }},
 		"non-function":           {handler: struct{}{}},
 
 		// Valid handlers
-		"valid": {handler: func(args, reply *struct{}) error { return nil }},
+		"valid": {handler: func(_, _ *struct{}) error { return nil }},
 	}
 
 	for name, data := range testData {
@@ -77,13 +77,13 @@ func TestGroup_AddMethodShouldNotPanicHandler(t *testing.T) {
 	testData := map[string]data{
 		// Invalid handlers, Group.AddMethod should not validate the handler.
 		"without arguments":      {handler: func() error { return nil }},
-		"without error":          {handler: func(args, reply *struct{}) {}},
+		"without error":          {handler: func(_, _ *struct{}) {}},
 		"without args and error": {handler: func() {}},
-		"non-pointer reply":      {handler: func(args, reply struct{}) error { return nil }},
+		"non-pointer reply":      {handler: func(_, _ struct{}) error { return nil }},
 		"non-function":           {handler: struct{}{}},
 
 		// Valid handlers
-		"valid": {handler: func(args, reply *struct{}) error { return nil }},
+		"valid": {handler: func(_, _ *struct{}) error { return nil }},
 	}
 
 	for name, data := range testData {
@@ -113,7 +113,7 @@ func TestGroup_UseShouldSetDefaultSeparator(t *testing.T) {
 	g.SetSeparator(sep)
 
 	g.Use(prefix, func(g *group.Group) {
-		g.AddMethod(method, func(args, reply *struct{}) error { return nil })
+		g.AddMethod(method, func(_, _ *struct{}) error { return nil })
 	})
 
 	r := &mockRegister{handlers: make(map[string]any)}
@@ -121,7 +121,11 @@ func TestGroup_UseShouldSetDefaultSeparator(t *testing.T) {
 	g.RegisterTo(r)
 
 	if _, ok := r.handlers[expectedMethod]; !ok {
-		t.Errorf("Group.Use() should set the default separator, expected method %q, got: %v", expectedMethod, r.handlers)
+		t.Errorf(
+			"Group.Use() should set the default separator, expected method %q, got: %v",
+			expectedMethod,
+			r.handlers,
+		)
 	}
 }
 
@@ -142,7 +146,7 @@ func TestGroup_UseSubgroupsSeparatorShouldOverwriteParents(t *testing.T) {
 
 	g.Use(prefix, func(g *group.Group) {
 		g.SetSeparator(subSep)
-		g.AddMethod(method, func(args, reply *struct{}) error { return nil })
+		g.AddMethod(method, func(_, _ *struct{}) error { return nil })
 	})
 
 	r := &mockRegister{handlers: make(map[string]any)}
@@ -150,7 +154,11 @@ func TestGroup_UseSubgroupsSeparatorShouldOverwriteParents(t *testing.T) {
 	g.RegisterTo(r)
 
 	if _, ok := r.handlers[expectedMethod]; !ok {
-		t.Errorf("Group.Use() should overwrite the separator, expected method %q, got: %v", expectedMethod, r.handlers)
+		t.Errorf(
+			"Group.Use() should overwrite the separator, expected method %q, got: %v",
+			expectedMethod,
+			r.handlers,
+		)
 	}
 }
 
@@ -163,7 +171,7 @@ func TestGroup_UseSubgroupShouldRegisterTheirSubgroups(t *testing.T) {
 
 	g.Use("math", func(g *group.Group) {
 		g.Use("arith", func(g *group.Group) {
-			g.AddMethod("add", func(args, reply *struct{}) error { return nil })
+			g.AddMethod("add", func(_, _ *struct{}) error { return nil })
 		})
 	})
 
@@ -175,7 +183,11 @@ func TestGroup_UseSubgroupShouldRegisterTheirSubgroups(t *testing.T) {
 	}
 
 	if _, ok := r.handlers[expectedMethod]; !ok {
-		t.Errorf("Group.Use() should register subgroups, expected method %q, got: %v", expectedMethod, r.handlers)
+		t.Errorf(
+			"Group.Use() should register subgroups, expected method %q, got: %v",
+			expectedMethod,
+			r.handlers,
+		)
 	}
 }
 
@@ -191,7 +203,7 @@ func TestGroup_UseShouldIgnoreSeparatorWhenCalledWithAnEmptyPrefix(t *testing.T)
 	var g group.Group
 
 	g.Use(prefix, func(g *group.Group) {
-		g.AddMethod(method, func(args, reply *struct{}) error { return nil })
+		g.AddMethod(method, func(_, _ *struct{}) error { return nil })
 	})
 
 	r := &mockRegister{handlers: make(map[string]any)}
@@ -199,7 +211,11 @@ func TestGroup_UseShouldIgnoreSeparatorWhenCalledWithAnEmptyPrefix(t *testing.T)
 	g.RegisterTo(r)
 
 	if _, ok := r.handlers[expectedMethod]; !ok {
-		t.Errorf("Group.Use() should ignore the separator, expected method %q, got: %v", expectedMethod, r.handlers)
+		t.Errorf(
+			"Group.Use() should ignore the separator, expected method %q, got: %v",
+			expectedMethod,
+			r.handlers,
+		)
 	}
 }
 
@@ -214,18 +230,23 @@ func TestGroup_RegisterToShouldReturnErrors(t *testing.T) {
 
 	var g group.Group
 
-	invalidHandler := func(args, reply *struct{}) {} // No error return.
-	validHandler := func(args, reply *struct{}) error { return nil }
+	invalidHandler := func(_, _ *struct{}) {} // No error return.
+	validHandler := func(_, _ *struct{}) error { return nil }
 
 	g.AddMethod(validMethod, validHandler)
 	g.AddMethod(invalidMethod, invalidHandler)
 
 	r := &mockRegister{handlers: make(map[string]any)}
-	r.setErr(invalidMethod, errors.New("invalid handler"))
+	r.setErr(invalidMethod, errors.New("invalid handler")) //nolint:err113
 
 	errs := g.RegisterTo(r)
 
 	if len(errs) != expectedErrors {
-		t.Errorf("Group.RegisterTo() should return %v error(s), got: %v: %v", expectedErrors, len(errs), errs)
+		t.Errorf(
+			"Group.RegisterTo() should return %v error(s), got: %v: %v",
+			expectedErrors,
+			len(errs),
+			errs,
+		)
 	}
 }
