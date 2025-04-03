@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/kytnacode/go-jrpc/jsonutil"
+	"github.com/kytnacode/go-jrpc/internal/jsonutil"
 	"github.com/kytnacode/go-jrpc/parse"
 )
 

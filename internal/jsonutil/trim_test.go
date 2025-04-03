@@ -3,7 +3,7 @@ package jsonutil_test
 import (
 	"testing"
 
-	"github.com/kytnacode/go-jrpc/jsonutil"
+	"github.com/kytnacode/go-jrpc/internal/jsonutil"
 )
 
 func TestTrimLeftWhitespace(t *testing.T) {
