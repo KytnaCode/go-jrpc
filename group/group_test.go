@@ -214,7 +214,7 @@ func TestGroup_RegisterToShouldReturnErrors(t *testing.T) {
 
 	var g group.Group
 
-	invalidadHandler := func(args, reply *struct{}) {} // No error return.
+	invalidHandler := func(args, reply *struct{}) {} // No error return.
 	validHandler := func(args, reply *struct{}) error { return nil }
 
 	g.AddMethod(validMethod, validHandler)
