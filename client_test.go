@@ -22,6 +22,21 @@ type rwc struct {
 	closed bool
 }
 
+type signalWriter struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func (w *signalWriter) Write(_ []byte) (n int, err error) {
+	if w.done != nil {
+		w.once.Do(func() {
+			close(w.done)
+		})
+	}
+
+	return 0, nil
+}
+
 func (rwc *rwc) Close() error {
 	rwc.closed = true
 
@@ -115,6 +130,32 @@ func TestClient_GoShouldReturnError(t *testing.T) {
 		if !errors.Is(call.Result[0].Error, jrpc.ErrInternalError) {
 			t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
 		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected call to be done, but it timed out")
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	}
+}
+
+func TestClient_GoShouldNotReturnAnResponseToANotification(t *testing.T) {
+	t.Parallel()
+
+	done := make(chan struct{})
+
+	conn := &rwc{
+		Reader: strings.NewReader(""),
+		Writer: &signalWriter{done: done},
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	c.Go(nil, jrpc.Call("foo").Args("bar").Notify())
+
+	select {
+	case <-done:
 	case <-time.After(1 * time.Second): // Timeout
 		t.Error("Expected call to be done, but it timed out")
 	case err := <-errCh:
@@ -326,6 +367,40 @@ func TestClient_GoBatchShouldReturnError(t *testing.T) {
 	}
 }
 
+func TestClient_GoBatchShouldNotReturnAnResponseToANotification(t *testing.T) {
+	t.Parallel()
+
+	conn := &rwc{
+		Reader: strings.NewReader(`[{ "jsonrpc":"2.0", "id":0, "result": 4.0}]` + "\n"),
+		Writer: io.Discard,
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	call := c.GoBatch(nil,
+		jrpc.Call("foo").Args("bar").Notify(), // notification
+		jrpc.Call("baz").Args("qux"),          // non-notification
+	)
+
+	select {
+	case <-call.Done:
+		if call.Error != nil {
+			t.Errorf("Expected no error, got %v", call.Error)
+		}
+
+		if len(call.Result) != 1 {
+			t.Fatalf("Expected 1 result, got %d", len(call.Result))
+		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected call to be done, but it timed out")
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	}
+}
+
 func TestClient_GoBatchShouldBeSafeForConcurrentUse(t *testing.T) {
 	t.Parallel()
 
@@ -347,8 +422,6 @@ func TestClient_GoBatchShouldBeSafeForConcurrentUse(t *testing.T) {
 				ID:     getID(uint64(i*n + j)), //nolint:gosec
 				Result: float64(i*n + j),
 			}
-
-			fmt.Printf("responses[%d][%d]: %v\n", i, j, responses[i][j])
 		}
 	}
 
