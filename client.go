@@ -61,7 +61,9 @@ type Client struct {
 	pendingMu sync.Mutex
 	pending   map[uint64]*CallState
 
-	closed chan struct{}
+	closeCh    chan struct{}
+	closedOnce sync.Once
+	closed     bool
 }
 
 // NewClient creates a new [Client] over the given connection, the client may call conn methods concurrently. The
@@ -81,7 +83,7 @@ func NewClient(conn io.ReadWriteCloser) *Client {
 		enc:     json.NewEncoder(conn),
 		dec:     json.NewDecoder(conn),
 		pending: make(map[uint64]*CallState),
-		closed:  make(chan struct{}, 1),
+		closeCh: make(chan struct{}, 1),
 	}
 }
 
@@ -151,7 +153,7 @@ func (c *Client) Closed() <-chan struct{} {
 	ch := make(chan struct{})
 
 	go func() {
-		<-c.closed
+		<-c.closeCh
 		close(ch)
 	}()
 
@@ -232,8 +234,16 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 
 	// Store the call in the pending map.
 	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+
+	if c.closed {
+		call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
+		call.Done <- call
+
+		return call
+	}
+
 	c.pending[seq] = call
-	c.pendingMu.Unlock()
 
 	return call
 }
@@ -318,12 +328,18 @@ func (c *Client) GoBatch(result chan *CallState, data ...*CallData) *CallState {
 
 	// All requests are mapped to the same call.
 	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+
+	if c.closed {
+		call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
+		call.Done <- call
+
+		return call
+	}
 
 	for _, seq := range seqs {
 		c.pending[seq] = call
 	}
-
-	c.pendingMu.Unlock()
 
 	return call
 }
@@ -442,6 +458,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 	// Close the connection and mark all pending calls as done.
 	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
 
 	responded := make(map[*CallState]struct{})
 
@@ -457,9 +474,10 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 		responded[call] = struct{}{}
 	}
 
-	c.pendingMu.Unlock()
-
-	close(c.closed)
+	c.closedOnce.Do(func() {
+		close(c.closeCh)
+		c.closed = true
+	})
 }
 
 // MakeCall behaves like [Call] but sets the generator to an autoincrementing ID:
