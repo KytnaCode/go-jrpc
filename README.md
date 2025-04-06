@@ -6,8 +6,7 @@ go-jrpc is a library to make  JSON-RPC 2.0 clients and build servers in Go.
 
 ## Overview
 
-go-jrpc provides a simple server and client compilant with the JSON-RPC 2.0 specification.
-
+go-jrpc provides a simple server and client compliant with the JSON-RPC 2.0 specification.
 go-jrpc provides:
 - A server that can handle JSON-RPC 2.0 requests over HTTP, net.Conn and net>Listener.
 - A client that can send JSON-RPC 2.0 requests over net.Conn.
