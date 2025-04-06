@@ -14,20 +14,7 @@ import (
 	"github.com/kytnacode/go-jrpc/parse"
 )
 
-const (
-	JSONRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
-	ParseError     = -32700
-	InvalidRequest = -32600
-	MethodNotFound = -32601
-	InvalidParams  = -32602
-	InternalError  = -32603
-)
-
-var (
-	ErrParse          = errors.New("failed to parse JSON-RPC message")
-	ErrInvalidRequest = errors.New("invalid JSON-RPC request")
-	ErrEmptyRequest   = errors.New("empty JSON-RPC request")
-)
+const JSONRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
 
 type Server struct {
 	registry MethodRegister       // Registry of methods.
