@@ -179,10 +179,8 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 	var req Request
 	req.JSONRPC = JSONRPCVersion
 	req.Method = data.method
-	req.ID = new(json.Number)
 
 	// Get the request ID, and increment the sequence number.
-
 	var seq uint64
 	if data.gen != nil {
 		data.GetID(&seq) // Get the ID from the generator.
@@ -192,7 +190,11 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 
 	id := json.Number(strconv.FormatUint(seq, 10))
 
-	*req.ID = id
+	if data.notify {
+		req.ID = nil // Notification, no ID.
+	} else {
+		req.ID = &id
+	}
 
 	if data.args == nil {
 		req.Params = nil // No params.
@@ -215,6 +217,10 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		done <- call
 
 		return call
+	}
+
+	if data.notify {
+		return call // Notification, no need to store the call.
 	}
 
 	// Store the call in the pending map.
@@ -260,20 +266,23 @@ func (c *Client) GoBatch(result chan *CallState, data ...*CallData) *CallState {
 		var req Request
 		req.JSONRPC = JSONRPCVersion
 		req.Method = d.method
-		req.ID = new(json.Number)
 
-		var seq uint64
-		if d.gen != nil {
-			d.GetID(&seq) // Get the ID from the generator.
+		if d.notify {
+			req.ID = nil // Notification, no ID.
 		} else {
-			seq = c.Next()
+			var seq uint64
+			if d.gen != nil {
+				d.GetID(&seq) // Get the ID from the generator.
+			} else {
+				seq = c.Next()
+			}
+
+			id := json.Number(strconv.FormatUint(seq, 10))
+
+			req.ID = &id
+
+			seqs = append(seqs, seq) // Store the ID of the request.
 		}
-
-		seqs = append(seqs, seq) // Store the ID of the request.
-
-		id := json.Number(strconv.FormatUint(seq, 10))
-
-		*req.ID = id
 
 		if d.args == nil {
 			req.Params = nil
@@ -531,6 +540,7 @@ type CallData struct {
 	args   any
 	id     *uint64
 	gen    Generator
+	notify bool
 }
 
 // Args sets the arguments for the call, and returns the [CallData] object itself:
@@ -538,6 +548,15 @@ type CallData struct {
 //	call := jrpc.Call("method").Args(args)
 func (c *CallData) Args(args any) *CallData {
 	c.args = args
+
+	return c
+}
+
+// Notify makes the request a notification, a request that does not expect a response from the server. In non-batch
+// calls [CallState].Done will be never closed, in batch calls [CallState].Done will be closed if there's at least
+// one non-notification request in the batch.
+func (c *CallData) Notify() *CallData {
+	c.notify = true
 
 	return c
 }
