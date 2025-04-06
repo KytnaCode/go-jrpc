@@ -24,11 +24,14 @@ type rwc struct {
 
 type signalWriter struct {
 	done chan struct{}
+	once sync.Once
 }
 
-func (w *signalWriter) Write(p []byte) (n int, err error) {
+func (w *signalWriter) Write(_ []byte) (n int, err error) {
 	if w.done != nil {
-		close(w.done)
+		w.once.Do(func() {
+			close(w.done)
+		})
 	}
 
 	return 0, nil
