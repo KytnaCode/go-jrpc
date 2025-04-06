@@ -61,8 +61,9 @@ type Client struct {
 	pendingMu sync.Mutex
 	pending   map[uint64]*CallState
 
-	closeCh chan struct{}
-	closed  bool
+	closeCh    chan struct{}
+	closedOnce sync.Once
+	closed     bool
 }
 
 // NewClient creates a new [Client] over the given connection, the client may call conn methods concurrently. The
@@ -472,8 +473,10 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 		responded[call] = struct{}{}
 	}
 
-	close(c.closeCh)
-	c.closed = true
+	c.closedOnce.Do(func() {
+		close(c.closeCh)
+		c.closed = true
+	})
 
 	c.pendingMu.Unlock()
 }
