@@ -458,6 +458,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 	// Close the connection and mark all pending calls as done.
 	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
 
 	responded := make(map[*CallState]struct{})
 
@@ -477,8 +478,6 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 		close(c.closeCh)
 		c.closed = true
 	})
-
-	c.pendingMu.Unlock()
 }
 
 // MakeCall behaves like [Call] but sets the generator to an autoincrementing ID:
