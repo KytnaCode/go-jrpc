@@ -148,7 +148,14 @@ func (c *Client) CallBatch(data ...*CallData) *CallState {
 // Closed returns a channel that will be closed when the client is closed, and all pending calls are done. If arleady
 // closed, the channel will be return immediately.
 func (c *Client) Closed() <-chan struct{} {
-	return c.closed
+	ch := make(chan struct{})
+
+	go func() {
+		<-c.closed
+		close(ch)
+	}()
+
+	return ch
 }
 
 // Go makes an asynchronous non-batch call to the server, and returns a [CallState] object. If done is nil, a new
