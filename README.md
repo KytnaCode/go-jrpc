@@ -59,11 +59,11 @@ func main() {
 	// Register methods.
 	var g group.Group
 
-  g.AddMethod("echo", func(args Args, reply *Reply) error {
-  reply.Result = args.A
+	g.AddMethod("echo", func(args Args, reply *Reply) error {
+		reply.Result = args.A
 
-  return nil
-}) 
+		return nil
+	}) 
 
 	g.AddMethod("add", func(args Args, reply *Reply) error {
 		reply.Result = args.A + args.B
