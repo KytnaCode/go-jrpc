@@ -60,10 +60,10 @@ func main() {
 	var g group.Group
 
   g.AddMethod("echo", func(args Args, reply *Reply) error {
-  reply.Result = args.A
+    reply.Result = args.A
 
-  return nil
-}) 
+    return nil
+  }) 
 
 	g.AddMethod("add", func(args Args, reply *Reply) error {
 		reply.Result = args.A + args.B
