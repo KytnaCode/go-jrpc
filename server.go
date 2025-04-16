@@ -64,6 +64,12 @@ func NewServer(errorLog func(string, ...any)) *Server {
 
 // SetRegistry allows to use a custom [MethodRegister] implementation, if nil the default [Registry] will be used.
 func (s *Server) SetRegistry(registry MethodRegister) {
+	if registry == nil {
+		s.registry = NewRegistry()
+
+		return
+	}
+
 	s.registry = registry
 }
 
