@@ -99,17 +99,8 @@ func WithLogger(logger func(string, ...any)) func(*Server) {
 	}
 }
 
-// Register registers a method with the given name and handler, handler must be a function that satisfies these
-// criteria:
-//   - Must take two arguments.
-//   - The first argument must be the method's arguments type.
-//   - The second argument must be a pointer to the method's reply type.
-//   - Both arguments and the reply type must be a struct or a pointer to a struct.
-//   - The handler must return an error.
-//
-// The handler must look like this:
-//
-//	func(args ArgsType, reply *ReplyType) error
+// Register registers a method with the given name and handler, if the default [MethodRegister] is used the handler must
+// the criteria defined on [Registry], different registries may have different criteria
 //
 // Implements the [Register] interface.
 // Is safe for concurrent use.

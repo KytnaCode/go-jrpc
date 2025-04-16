@@ -14,16 +14,24 @@ const (
 	handlerReplyIndex  = 1
 )
 
+// Errors returned by the Registry.
 var (
+	// ErrInvalidHandlerType is returned when the handler does not satisfy the requirements.
 	ErrInvalidHandlerType = errors.New(
-		"Invalid handler type",
-	) // Error returned when the handler is invalid.
+		"invalid handler type",
+	)
+
+	// Error returned when the method is not found.
 	ErrMethodNotFound = errors.New(
-		"Method not found",
-	) // Error returned when the method is not found.
+		"method not found",
+	)
 )
 
-// Register is a type-safe wrapper around Register.Register.
+// RegisterInto is a type-safe wrapper around Register.Register:
+//
+//	 err := RegisterInto[ArgsType, ReplyType](r, "method", func(args ArgsType, reply *ReplyType) error { ... })
+//	// Is equivalent to:
+//	 err := r.Register("method", func(args ArgsType, reply *ReplyType) error { ... })
 func RegisterInto[I, O any](r Register, method string, handler func(in I, out *O) error) error {
 	if r.Register(method, handler) != nil {
 		return fmt.Errorf("failed to register method %q: %w", method, ErrInvalidHandlerType)
@@ -51,20 +59,37 @@ type MethodRegister interface {
 	MethodParamsType(method string) (reflect.Type, error)
 }
 
-// Registry registers handlers and calls them. Implements the Register interface.
+// Registry registers handlers and calls them. Implements the Register interface, handlers must satisfy the
+// following requirements:
+//   - Must take two arguments.
+//   - The first argument must be the method's arguments type.
+//   - The second argument must be a pointer to the method's reply type.
+//   - Both arguments and the reply type must be a struct or a pointer to a struct.
+//   - The handler must return an error.
+//
+// The handler must look like this:
+//
+//	func(args ArgsType, reply *ReplyType) error
+//
 // Is safe for concurrent use.
 type Registry struct {
 	handlers sync.Map
 }
 
-// NewRegistry creates a new Registry.
+// NewRegistry creates a new [Registry].
 func NewRegistry() *Registry {
 	return &Registry{}
 }
 
-// Call calls the handler for the method with the params and returns the reply.
-// Params must be a struct or a pointer to a struct, for get a valid
-// struct from the raw params use the parse.Params or parse.ParamsType functions.
+// Call calls the handler for the method with the params and returns the reply. Params must be a struct or a pointer
+// to a struct, for get a valid struct from the raw params use the [parse.Params] or [parse.ParamsType] functions:
+//
+//	result, err := Call("method", &Params{...})
+//	if err != nil {
+//	    // handle error
+//	}
+//
+//	fmt.Printf("%T: %v\n", result, result)
 func (r *Registry) Call(method string, params any) (any, error) {
 	handler, ok := r.handlers.Load(method)
 	if !ok {
@@ -109,7 +134,8 @@ func (r *Registry) Register(method string, handler any) error {
 	return nil
 }
 
-// MethodParamsType returns the type of the method's arguments type.
+// MethodParamsType returns the type of the method's arguments type. If the method is not found, it returns an
+// [ErrMethodNotFound] error.
 func (r *Registry) MethodParamsType(method string) (reflect.Type, error) {
 	handler, ok := r.handlers.Load(method)
 	if !ok {
@@ -134,8 +160,8 @@ func validateHandler(handlerT reflect.Type) error {
 	}
 
 	// Check if the first argument is a struct or a pointer to a struct.
-	if handlerT.In(0).Kind() != reflect.Struct &&
-		!(handlerT.In(0).Kind() == reflect.Pointer && handlerT.In(0).Elem().Kind() == reflect.Struct) {
+	if in := handlerT.In(0); in.Kind() != reflect.Struct && in.Kind() != reflect.Pointer ||
+		in.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf(
 			"handler's first argument must be a struct or a pointer to a struct, got %v: %w",
 			handlerT.In(0).Kind(),
