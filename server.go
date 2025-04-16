@@ -14,13 +14,46 @@ import (
 	"github.com/kytnacode/go-jrpc/parse"
 )
 
-const JSONRPCVersion = "2.0" // Must be "2.0" for all JSON-RPC 2.0 messages.
+// JSONRPCVersion must be "2.0" for all JSON-RPC 2.0 messages.
+const JSONRPCVersion = "2.0"
 
+// Server is the entry point for the JSON-RPC server, it allows registering methods and handling requests via HTTP, a
+// listener, or a connection:
+//
+//	  server := jrpc.NewServer(log.Printf)
+//
+//	  err := server.Register("method", func(args struct{ A int }, reply *struct{ B int }) error {
+//	    reply.B = args.A + 1
+//
+//	    return nil
+//	  })
+//	  if err != nil {
+//	    log.Fatal(err)
+//	  }
+//
+//	  // via HTTP
+//	  http.Handle("/rpc", server)
+//	  log.Fatal(http.ListenAndServe(":8080", nil))
+//
+//	  // or via a Listener
+//	  lis, err := net.Listen("tcp", ":8080")
+//	  if err != nil {
+//			 log.Fatal(err)
+//	  }
+//
+//	  err = server.Accept(context.Background(), lis)
+//	  if err != nil {
+//	    log.Fatal(err)
+//	  }
+//
+// Implements [Register], [Caller], [MethodRegister] and [http.Handler] interfaces.
 type Server struct {
 	registry MethodRegister       // Registry of methods.
 	errorLog func(string, ...any) // Log errors.
 }
 
+// NewServer creates a new Server with the given error log function.
+// If errorLog is nil, it will be a no-op function.
 func NewServer(errorLog func(string, ...any)) *Server {
 	if errorLog == nil {
 		errorLog = func(string, ...any) {}
@@ -29,12 +62,25 @@ func NewServer(errorLog func(string, ...any)) *Server {
 	return &Server{errorLog: errorLog, registry: NewRegistry()}
 }
 
-// SetRegistry sets the registry of methods, if not set, a new registry is created.
+// SetRegistry allows to use a custom [MethodRegister] implementation, if nil the default [Registry] will be used.
 func (s *Server) SetRegistry(registry MethodRegister) {
 	s.registry = registry
 }
 
-// Register registers a method with the server. Implements the Register interface.
+// Register registers a method with the given name and handler, handler must be a function that satisfies these
+// criteria:
+//   - Must take two arguments.
+//   - The first argument must be the method's arguments type.
+//   - The second argument must be a pointer to the method's reply type.
+//   - Both arguments and the reply type must be a struct or a pointer to a struct.
+//   - The handler must return an error.
+//
+// The handler must look like this:
+//
+//	func(args ArgsType, reply *ReplyType) error
+//
+// Implements the [Register] interface.
+// Is safe for concurrent use.
 func (s *Server) Register(method string, handler any) error {
 	if s.registry.Register(method, handler) != nil {
 		return fmt.Errorf("failed to register method %q: %w", method, ErrInvalidHandlerType)
@@ -43,6 +89,18 @@ func (s *Server) Register(method string, handler any) error {
 	return nil
 }
 
+// Accept accepts connections from the given listener and serves them using the [ServeConn] method, it blocks until the
+// context is done or an error occurs on the listener:
+//
+//	  lis, err := net.Listen("tcp", ":8080")
+//	  if err != nil {
+//			 log.Fatal(err)
+//	  }
+//
+//	  err = server.Accept(context.Background(), lis)
+//	  if err != nil {
+//	    log.Fatal(err)
+//	  }
 func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -62,9 +120,18 @@ func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
 	}
 }
 
-// ServeConn reads and writes JSON-RPC messages from conn.
-// It decodes the requests from conn and encodes the responses back to conn.
-// Closes conn when done.
+// ServeConn reads requests from conn and writes responses to it, it blocks until the context is done or an error
+// occurs, it closes conn when done, conn must be safe for concurrent use:
+//
+//	  conn, err := net.Dial("tcp", ":8080")
+//	  if err != nil {
+//			 log.Fatal(err)
+//	  }
+//
+//	  err = server.ServeConn(context.Background(), conn)
+//		 if err != nil {
+//			 log.Fatal(err) // An error occurred or the context was cancelled.
+//		 }
 func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -115,7 +182,7 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 	}
 }
 
-// ServeHTTP implements the http.Handler interface.
+// ServeHTTP implements the [http.Handler] interface.
 // Return a 400 status code if a parse error occurs.
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	dec := json.NewDecoder(req.Body)
@@ -192,7 +259,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // responses slice will be nil and batch will be false.
 func (s *Server) handleMessage(msg *json.RawMessage) (res []Response, batch bool, err error) {
 	trimmedMsg := jsonutil.TrimLeftWhitespace(*msg) // Trim leading whitespace.
-	if len(trimmedMsg) == 0 {
+	if len(trimmedMsg) == 0 {                       // Empty message.
 		return nil, false, ErrEmptyRequest
 	}
 
