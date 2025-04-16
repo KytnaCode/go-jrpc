@@ -160,8 +160,8 @@ func validateHandler(handlerT reflect.Type) error {
 	}
 
 	// Check if the first argument is a struct or a pointer to a struct.
-	if in := handlerT.In(0); in.Kind() != reflect.Struct && in.Kind() != reflect.Pointer ||
-		in.Elem().Kind() != reflect.Struct {
+	if in := handlerT.In(0); in.Kind() != reflect.Struct && (in.Kind() != reflect.Pointer ||
+		in.Elem().Kind() != reflect.Struct) {
 		return fmt.Errorf(
 			"handler's first argument must be a struct or a pointer to a struct, got %v: %w",
 			handlerT.In(0).Kind(),
