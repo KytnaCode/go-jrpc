@@ -80,7 +80,7 @@ func TestServer_ServeConnInvalidJSON(t *testing.T) {
 		testSucceedc <- struct{}{} // Error log should be called.
 	}
 
-	s := jrpc.NewServer(errorLog)
+	s := jrpc.CreateServer(jrpc.WithLogger(errorLog))
 
 	go s.ServeConn(context.Background(), conn)
 
@@ -111,7 +111,7 @@ func TestServer_ServeConnValidBatch(t *testing.T) {
 
 	conn := newIOReadWriteCloser(strings.NewReader(batch), w)
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	go s.ServeConn(context.Background(), conn)
 
@@ -143,7 +143,7 @@ func TestServer_ServeConnInvalidBatch(t *testing.T) {
 		testSucceedc <- struct{}{} // Error log should be called.
 	}
 
-	s := jrpc.NewServer(errorLog)
+	s := jrpc.CreateServer(jrpc.WithLogger(errorLog))
 
 	go s.ServeConn(context.Background(), conn)
 
@@ -170,7 +170,7 @@ func TestServer_ServeConnValidSingle(t *testing.T) {
 
 	conn := newIOReadWriteCloser(strings.NewReader(request), w)
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	go s.ServeConn(context.Background(), conn)
 
@@ -200,7 +200,7 @@ func TestServer_ServeConnInvalidSingle(t *testing.T) {
 		testSucceedc <- struct{}{} // Error log should be called.
 	}
 
-	s := jrpc.NewServer(errorLog)
+	s := jrpc.CreateServer(jrpc.WithLogger(errorLog))
 
 	go s.ServeConn(context.Background(), conn)
 
@@ -225,7 +225,7 @@ func TestServer_ServeConnShouldCloseConn(t *testing.T) {
 
 	conn := newIOReadWriteCloser(strings.NewReader(request), io.Discard)
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -243,7 +243,7 @@ func TestServer_ServeConnShouldBeSafeForConcurrentUse(t *testing.T) {
 	// A valid single request.
 	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -280,7 +280,7 @@ func TestServer_ServeHTTPInvalidJSON(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -307,7 +307,7 @@ func TestServer_ServeHTTPValidBatch(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -333,7 +333,7 @@ func TestServer_ServeHTTPInvalidBatch(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -356,7 +356,7 @@ func TestServer_ServeHTTPValidSingle(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	if err := s.Register("foo", func(_, _ *struct{}) error { return nil }); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -383,7 +383,7 @@ func TestServer_ServeHTTPInvalidSingle(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -406,7 +406,7 @@ func TestServer_ServeHTTPNonObjectNonBatch(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -429,7 +429,7 @@ func TestServer_ServeHTTPShouldNotWriteResponseToASingleNotification(t *testing.
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -459,7 +459,7 @@ func TestServer_ServeHTTPShouldNotWriteResponseToABatchOfNotifications(t *testin
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -492,7 +492,7 @@ func TestServer_ServeHTTPShouldReturnABatchOfResponsesExcludingNotifications(t *
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -523,7 +523,7 @@ func TestServer_ServeHTTPShouldNotPanicWithNilParams(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	if err := s.Register("foo", func(_, _ *struct{}) error { return nil }); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -549,7 +549,7 @@ func TestServer_ServeHTTPShouldNotPanicWithoutParams(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	if err := s.Register("foo", func(_, _ *struct{}) error { return nil }); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -578,7 +578,7 @@ func TestServer_ServeHTTPMissingJSONRPCVersion(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -616,7 +616,7 @@ func TestServer_ServeHTTPEmptyMethodShouldReturnBadRequest(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	s.ServeHTTP(w, req)
 
@@ -643,7 +643,7 @@ func TestServer_ServeHTTPShouldBeSafeForConcurrentUse(t *testing.T) {
 
 	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
 
-	s := jrpc.NewServer(nil)
+	s := jrpc.NewServer()
 
 	const n = 10
 
@@ -688,7 +688,7 @@ func TestServer_AcceptShouldBeSafeForConcurrentUse(t *testing.T) {
 		go func() {
 			l := &listener{}
 
-			s := jrpc.NewServer(nil)
+			s := jrpc.NewServer()
 
 			err := s.Accept(ctx, l)
 			if err != nil && !errors.Is(err, context.Canceled) {
@@ -736,7 +736,7 @@ func TestServerShouldServeOverHTTPAndConnectionAndListenerConcurrently(t *testin
 		go func() {
 			l := &listener{}
 
-			s := jrpc.NewServer(nil)
+			s := jrpc.NewServer()
 
 			err := s.Accept(ctx, l)
 			if err != nil && !errors.Is(err, context.Canceled) {
@@ -751,7 +751,7 @@ func TestServerShouldServeOverHTTPAndConnectionAndListenerConcurrently(t *testin
 
 			conn := newIOReadWriteCloser(r, io.Discard)
 
-			s := jrpc.NewServer(nil)
+			s := jrpc.NewServer()
 
 			s.ServeConn(ctx, conn)
 
@@ -767,7 +767,7 @@ func TestServerShouldServeOverHTTPAndConnectionAndListenerConcurrently(t *testin
 
 			w := httptest.NewRecorder()
 
-			s := jrpc.NewServer(nil)
+			s := jrpc.NewServer()
 
 			s.ServeHTTP(w, req)
 

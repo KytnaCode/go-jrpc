@@ -54,7 +54,11 @@ type Reply struct {
 
 func main() {
 	// Create a new server.
-	s := jrpc.NewServer(log.Printf)
+    // s := jrpc.NewServer() For default options: no logging and default method registry.
+	s := jrpc.CreateServer(
+        jrpc.WithLogger(log.Printf) // Log to stdout. If a logger is not provided or nil, no logging is done.
+        jrpc.WithRegistry(customRegistry), // Custom method registry. If a registry is not provided or is nil, the default registry is used.
+    )
 
 	// Register methods.
 	var g group.Group
@@ -63,7 +67,7 @@ func main() {
 		reply.Result = args.A
 
 		return nil
-	}) 
+	})
 
 	g.AddMethod("add", func(args Args, reply *Reply) error {
 		reply.Result = args.A + args.B

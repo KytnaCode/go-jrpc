@@ -52,7 +52,7 @@ func div(args Args, reply *Reply) error {
 }
 
 func main() {
-	s := jrpc.NewServer(log.Printf)
+	s := jrpc.CreateServer(jrpc.WithLogger(log.Printf))
 
 	var g group.Group
 

@@ -20,7 +20,7 @@ const JSONRPCVersion = "2.0"
 // Server is the entry point for the JSON-RPC server, it allows registering methods and handling requests via HTTP, a
 // listener, or a connection:
 //
-//	  server := jrpc.NewServer(log.Printf)
+//	  server := jrpc.CreateServer(jrpc.WithLogger(log.Printf))
 //
 //	  err := server.Register("method", func(args struct{ A int }, reply *struct{ B int }) error {
 //	    reply.B = args.A + 1
@@ -52,25 +52,51 @@ type Server struct {
 	errorLog func(string, ...any) // Log errors.
 }
 
-// NewServer creates a new Server with the given error log function.
-// If errorLog is nil, it will be a no-op function.
-func NewServer(errorLog func(string, ...any)) *Server {
-	if errorLog == nil {
-		errorLog = func(string, ...any) {}
-	}
-
-	return &Server{errorLog: errorLog, registry: NewRegistry()}
+// NewServer creates a new Server, it uses the default [Registry] and a no-op error logger, to use a custom registry
+// or to log errors, use [CreateServer] with [WithRegistry] or [WithLogger] options.
+func NewServer() *Server {
+	return CreateServer(WithRegistry(nil), WithLogger(nil))
 }
 
-// SetRegistry allows to use a custom [MethodRegister] implementation, if nil the default [Registry] will be used.
-func (s *Server) SetRegistry(registry MethodRegister) {
-	if registry == nil {
-		s.registry = NewRegistry()
+// ServerOpt allow to configure the server when creating it with [CreateServer].
+type ServerOpt func(*Server)
 
-		return
+// CreateServer creates a new Server with the given options, by default it uses a new [Registry] and a no-op error
+// logger.
+func CreateServer(opts ...ServerOpt) *Server {
+	s := new(Server)
+
+	s.errorLog = func(string, ...any) {} // No-op error logger.
+	s.registry = NewRegistry()           // Default registry.
+
+	for _, opt := range opts {
+		opt(s)
 	}
 
-	s.registry = registry
+	return s
+}
+
+// WithRegistry allows to use a custom register when creating a server with [CreateServer], if nil, a new [Registry] is
+// created.
+func WithRegistry(registry MethodRegister) ServerOpt {
+	return func(s *Server) {
+		if registry == nil {
+			s.registry = NewRegistry()
+		} else {
+			s.registry = registry
+		}
+	}
+}
+
+// WithLogger allows to use a custom logger when creating a server with [CreateServer], if nil, no logging is done.
+func WithLogger(logger func(string, ...any)) func(*Server) {
+	return func(s *Server) {
+		if logger == nil {
+			s.errorLog = func(string, ...any) {}
+		} else {
+			s.errorLog = logger
+		}
+	}
 }
 
 // Register registers a method with the given name and handler, handler must be a function that satisfies these
