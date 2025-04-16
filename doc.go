@@ -2,10 +2,9 @@
 //   - Provides a client with support for single and batch requests, notifications, synchronous and asynchronous calls.
 //   - Provides a server with support for single and batch requests, notifications, and concurrent use.
 //
-// To create a new server, use the NewServer function:
+// To create a new server, use the CreateServer or NewServer functions:
 //
-//	server := jrpc.NewServer(log.Printf) // Log to standard output. If log is nil, no logging is done.
-//
+//	server := jrpc.CreateServer(jrpc.WithLogger(log.Printf)) // Log to stdout.
 //	var g group.Group
 //
 //	g.AddMethod("echo", func(args struct{ A string }, reply *struct{ C string }) error {
