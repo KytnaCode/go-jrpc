@@ -227,6 +227,205 @@ func TestClient_GoShouldBeSafeForConcurrentUse(t *testing.T) {
 	}
 }
 
+func TestClient_CallShouldReturnResult(t *testing.T) {
+	t.Parallel()
+
+	const result = 4.0
+
+	request := fmt.Sprintf(`{"jsonrpc":"2.0", "id":0, "result": %v}`+"\n", result)
+
+	r, w := io.Pipe()
+
+	conn := &rwc{
+		Reader: r,
+		Writer: io.Discard,
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	go func() {
+		_, err := w.Write([]byte(request))
+		if err != nil {
+			errCh <- err
+		}
+	}()
+
+	call := c.Call(jrpc.Call("foo").Args("bar"))
+
+	select {
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	default:
+		if call.Error != nil {
+			t.Errorf("Expected no error, got %v", call.Error)
+		}
+
+		if call.Result[0].Error != nil {
+			t.Errorf("Expected no error, got %v", call.Result[0].Error)
+		}
+
+		if call.Result[0].Result != result {
+			t.Errorf("Expected %v, got %v", result, call.Result[0].Result)
+		}
+	}
+}
+
+func TestClient_CallShouldReturnError(t *testing.T) {
+	t.Parallel()
+
+	response := `{"jsonrpc":"2.0", "id":0, "error": {"code": -32603, "message": "internal error"}}` + "\n"
+
+	r, w := io.Pipe()
+
+	conn := &rwc{
+		Reader: r,
+		Writer: io.Discard,
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	go func() {
+		_, err := w.Write([]byte(response))
+		if err != nil {
+			errCh <- err
+		}
+	}()
+
+	call := c.Call(jrpc.Call("foo").Args("bar"))
+
+	select {
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	default:
+		if call.Error != nil { // Client error.
+			t.Fatal("Expected call to return a server error, but not a client error")
+		}
+
+		if call.Result[0].Error == nil { // Server response error.
+			t.Fatalf("Expected call return an error,  got %v", call.Result[0])
+		}
+
+		if !errors.Is(call.Result[0].Error, jrpc.ErrInternalError) {
+			t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
+		}
+	}
+}
+
+func TestClient_CallShouldNotReturnAnResponseToANotification(t *testing.T) {
+	t.Parallel()
+
+	conn := &rwc{
+		Reader: strings.NewReader(""),
+		Writer: io.Discard,
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	call := c.Call(jrpc.Call("foo").Args("bar").Notify())
+
+	select {
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected call to be done, but it timed out")
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	default:
+		if call.Error != nil {
+			t.Errorf("Expected no error, got %v", call.Error)
+		}
+
+		if call.Result != nil {
+			t.Errorf("Expected no result, got %v", call.Result)
+		}
+	}
+}
+
+func TestClient_CallShouldBeSafeForConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	const result = 4.0
+
+	const n = 10
+
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	responses := make([][]byte, n)
+	for i := range n {
+		res := jrpc.Response{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(uint64(i)), //nolint:gosec
+			Result:  float64(i),
+		}
+
+		b, err := json.Marshal(res)
+		if err != nil {
+			t.Fatalf("Failed to marshal response: %v", err)
+		}
+
+		responses[i] = b
+	}
+
+	r, w := io.Pipe()
+
+	conn := &rwc{
+		Reader: r,
+		Writer: io.Discard,
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+
+	wg.Add(n)
+
+	for range n {
+		go func() {
+			c.Call(jrpc.Call("foo").Args("bar"))
+
+			wg.Done()
+		}()
+	}
+
+	go func() {
+		for i := range n {
+			_, err := w.Write(responses[i])
+			if err != nil {
+				errCh <- err
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected call to be done, but it timed out")
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	}
+}
+
 func TestClient_GoBatchShouldReturnResult(t *testing.T) {
 	t.Parallel()
 
