@@ -229,6 +229,8 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 	}
 
 	if data.notify {
+		call.Done <- call // Notification, no need to wait for the response.
+
 		return call // Notification, no need to store the call.
 	}
 
