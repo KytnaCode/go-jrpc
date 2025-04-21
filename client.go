@@ -26,6 +26,9 @@ var (
 
 	// Server returned an empty response on a non-notify call.
 	ErrEmptyResponse = errors.New("unexpected empty response")
+
+	// An error occurred in one or more requests in a batch call.
+	ErrBatch = errors.New("error in batch response")
 )
 
 // Client represents a JSON-RPC client, it is used to make calls to the server, is necessary to call [Client.Input]
@@ -415,6 +418,8 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				for _, res := range m.res {
 					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
+						call.Done <- call
+
 						errCh <- fmt.Errorf("failed to parse ID: %w", err)
 						c.pendingMu.Unlock()
 
@@ -434,12 +439,28 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 			results := make(map[uint64]CallResult, len(m.res))
 
+			if !m.batch && m.res[0].Error != nil {
+				call.Error = resToError(m.res[0])
+				call.Result = results
+				call.Done <- call
+
+				continue
+			}
+
+			var batchErr bool
+
 			for _, res := range m.res {
 				var id uint64
+
 				if m.batch {
 					id, err = strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
 						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+
+						batchErr = true
+						results[id] = CallResult{
+							Error: fmt.Errorf("failed to parse ID: %w", ErrParse),
+						}
 
 						continue
 					}
@@ -448,6 +469,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				}
 
 				if res.Error != nil {
+					batchErr = true
 					results[id] = CallResult{
 						Error: resToError(res),
 					}
@@ -458,6 +480,10 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				results[id] = CallResult{
 					Result: res.Result,
 				}
+			}
+
+			if batchErr {
+				call.Error = fmt.Errorf("error in batch response: %w", ErrBatch)
 			}
 
 			call.Result = results

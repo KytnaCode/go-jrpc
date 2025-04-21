@@ -136,15 +136,11 @@ func TestClient_GoShouldReturnError(t *testing.T) {
 
 	select {
 	case <-call.Done:
-		if call.Error != nil { // Client error.
-			t.Fatal("Expected call to return a server error, but not a client error")
+		if call.Error == nil {
+			t.Fatal("Expected call to return an error")
 		}
 
-		if call.Result[0].Error == nil { // Server response error.
-			t.Fatalf("Expected call return an error,  got %v", call.Result[0])
-		}
-
-		if !errors.Is(call.Result[0].Error, jrpc.ErrInternalError) {
+		if !errors.Is(call.Error, jrpc.ErrInternalError) {
 			t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
 		}
 	case <-time.After(1 * time.Second): // Timeout
@@ -182,8 +178,6 @@ func TestClient_GoShouldNotReturnAnResponseToANotification(t *testing.T) {
 
 func TestClient_GoShouldBeSafeForConcurrentUse(t *testing.T) {
 	t.Parallel()
-
-	const result = 4.0
 
 	const n = 10
 
@@ -338,15 +332,11 @@ func TestClient_CallShouldReturnError(t *testing.T) {
 	case err := <-errCh:
 		t.Errorf("Failed handling request: %v", err)
 	default:
-		if call.Error != nil { // Client error.
-			t.Fatal("Expected call to return a server error, but not a client error")
+		if call.Error == nil {
+			t.Fatal("Expected call to return an error")
 		}
 
-		if call.Result[0].Error == nil { // Server response error.
-			t.Fatalf("Expected call return an error,  got %v", call.Result[0])
-		}
-
-		if !errors.Is(call.Result[0].Error, jrpc.ErrInternalError) {
+		if !errors.Is(call.Error, jrpc.ErrInternalError) {
 			t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
 		}
 	}
@@ -596,8 +586,12 @@ func TestClient_GoBatchShouldReturnError(t *testing.T) {
 
 	select {
 	case <-call.Done:
-		if call.Error != nil { // Client error.
-			t.Fatal("Expected call to return a server error, but not a client error")
+		if call.Error == nil {
+			t.Error("Expected call to return an error")
+		}
+
+		if !errors.Is(call.Error, jrpc.ErrBatch) {
+			t.Fatalf("Expected batch error, got %v", call.Error)
 		}
 
 		if len(call.Result) != 2 {
