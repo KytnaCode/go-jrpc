@@ -141,11 +141,6 @@ func main() {
 		return
 	}
 
-	if err := call.Result[0].Error; err != nil {
-		log.Printf("error: %v", err)
-		return
-	}
-
 	// Handle the result
 	result := call.Result[0].Result
 }
