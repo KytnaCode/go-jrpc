@@ -272,10 +272,15 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 //	// Handle responses
 //	result1 := call.Result[id1] // Result of method1.
 //	result2 := call.Result[id2] // Result of method2.
-func (c *Client) GoBatch(result chan *CallState, data ...*CallData) *CallState {
+func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 	call := new(CallState)
-	call.Done = make(chan *CallState, 1)
 	call.Batch = true
+
+	if done != nil {
+		call.Done = done
+	} else {
+		call.Done = make(chan *CallState, 1)
+	}
 
 	reqs := make([]Request, 0, len(data))
 
@@ -309,7 +314,7 @@ func (c *Client) GoBatch(result chan *CallState, data ...*CallData) *CallState {
 			params, err := json.Marshal(d.args)
 			if err != nil {
 				call.Error = err
-				result <- call
+				call.Done <- call
 
 				return call
 			}
@@ -323,7 +328,7 @@ func (c *Client) GoBatch(result chan *CallState, data ...*CallData) *CallState {
 
 	if err := c.enc.Encode(reqs); err != nil {
 		call.Error = err
-		result <- call
+		call.Done <- call
 
 		return call
 	}
