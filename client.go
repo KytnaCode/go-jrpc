@@ -494,10 +494,7 @@ func (c *Client) MakeCall(method string) *CallData {
 
 // Next returns an incrementing ID starting from 0. Implements [Generator].
 func (c *Client) Next() uint64 {
-	seq := c.seq.Load()
-	c.seq.Add(1)
-
-	return seq
+	return c.seq.Add(1) - 1
 }
 
 // Generator defines the interface for generate IDs for the calls. The [Client] implements this interface.
