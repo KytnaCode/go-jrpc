@@ -411,6 +411,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
 						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+						c.pendingMu.Unlock()
 
 						continue
 					}
@@ -419,6 +420,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				}
 			} else {
 				errCh <- fmt.Errorf("failed to find call with ID %d: %w", id, ErrUnmatchedCall)
+				c.pendingMu.Unlock()
 
 				continue
 			}
