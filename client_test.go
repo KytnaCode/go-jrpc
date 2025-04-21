@@ -25,16 +25,33 @@ type rwc struct {
 type signalWriter struct {
 	done chan struct{}
 	once sync.Once
+	n    int
+	mu   sync.Mutex
 }
 
 func (w *signalWriter) Write(_ []byte) (n int, err error) {
-	if w.done != nil {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.done != nil && w.n <= 0 {
 		w.once.Do(func() {
 			close(w.done)
 		})
 	}
 
+	w.n--
+
 	return 0, nil
+}
+
+type counter struct {
+	n uint64
+}
+
+func (c *counter) Next() uint64 {
+	c.n++
+
+	return c.n - 1
 }
 
 func (rwc *rwc) Close() error {
@@ -170,18 +187,28 @@ func TestClient_GoShouldBeSafeForConcurrentUse(t *testing.T) {
 
 	const n = 10
 
-	format := `{"jsonrpc":"2.0", "id":%v, "result": %v}` + "\n"
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
 
-	responses := make([]string, n)
+		return &id
+	}
+
+	responses := make([]jrpc.Response, n)
 	for i := range n {
-		responses[i] = fmt.Sprintf(format, i, result)
+		responses[i] = jrpc.Response{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(uint64(i)), //nolint:gosec
+			Result:  float64(i),
+		}
 	}
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{n: n - 1, done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -196,17 +223,25 @@ func TestClient_GoShouldBeSafeForConcurrentUse(t *testing.T) {
 	wg.Add(n)
 
 	for range n {
-		call := c.Go(nil, jrpc.Call("foo").Args("bar"))
-
 		go func() {
-			<-call.Done
+			<-c.Go(nil, jrpc.Call("foo").Args("bar")).Done
+
 			wg.Done()
 		}()
 	}
 
+	<-written
+
 	go func() {
 		for i := range n {
-			_, err := w.Write([]byte(responses[i]))
+			b, err := json.Marshal(responses[i])
+			if err != nil {
+				errCh <- err
+
+				continue
+			}
+
+			_, err = w.Write(b)
 			if err != nil {
 				errCh <- err
 			}
@@ -378,9 +413,11 @@ func TestClient_CallShouldBeSafeForConcurrentUse(t *testing.T) {
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{n: n - 1, done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -401,6 +438,8 @@ func TestClient_CallShouldBeSafeForConcurrentUse(t *testing.T) {
 			wg.Done()
 		}()
 	}
+
+	<-written
 
 	go func() {
 		for i := range n {
@@ -641,19 +680,25 @@ func TestClient_GoBatchShouldBeSafeForConcurrentUse(t *testing.T) {
 		}
 	}
 
+	counter := &counter{}
+
 	calls := make([][]*jrpc.CallData, n)
 	for i := range n {
 		calls[i] = make([]*jrpc.CallData, n)
 		for j := range n {
-			calls[i][j] = jrpc.Call("foo").Args("bar")
+			// Pregenerate ID's to match with the response. Client will be called from different goroutines, so it not will
+			// generate ID's in order, and the response's ids are in order.
+			calls[i][j] = jrpc.Call("foo").Args("bar").GenID(counter).GetID(new(uint64))
 		}
 	}
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{n: n - 1, done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -668,13 +713,13 @@ func TestClient_GoBatchShouldBeSafeForConcurrentUse(t *testing.T) {
 	wg.Add(n)
 
 	for i := range n {
-		call := c.GoBatch(nil, calls[i]...)
-
 		go func() {
-			<-call.Done
+			<-c.GoBatch(nil, calls[i]...).Done
 			wg.Done()
 		}()
 	}
+
+	<-written
 
 	go func() {
 		for i := range n {
