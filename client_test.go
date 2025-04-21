@@ -351,8 +351,6 @@ func TestClient_CallShouldNotReturnAnResponseToANotification(t *testing.T) {
 func TestClient_CallShouldBeSafeForConcurrentUse(t *testing.T) {
 	t.Parallel()
 
-	const result = 4.0
-
 	const n = 10
 
 	getID := func(i uint64) *json.Number {
@@ -362,6 +360,7 @@ func TestClient_CallShouldBeSafeForConcurrentUse(t *testing.T) {
 	}
 
 	responses := make([][]byte, n)
+
 	for i := range n {
 		res := jrpc.Response{
 			JSONRPC: jrpc.JSONRPCVersion,
