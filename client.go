@@ -223,32 +223,32 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		*req.Params = json.RawMessage(params)
 	}
 
+	if data.notify {
+		call.Done <- call
+	} else {
+		// Store the call in the pending map.
+		c.pendingMu.Lock()
+		defer c.pendingMu.Unlock()
+
+		if c.closed {
+			call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
+			call.Done <- call
+
+			return call
+		}
+
+		c.pending[seq] = call
+	}
+
 	// Send the request to the server.
 	if err := c.enc.Encode(req); err != nil {
 		call.Error = err
-		done <- call
-
-		return call
-	}
-
-	if data.notify {
-		call.Done <- call // Notification, no need to wait for the response.
-
-		return call // Notification, no need to store the call.
-	}
-
-	// Store the call in the pending map.
-	c.pendingMu.Lock()
-	defer c.pendingMu.Unlock()
-
-	if c.closed {
-		call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
 		call.Done <- call
 
+		delete(c.pending, seq) // Remove the call from the pending map.
+
 		return call
 	}
-
-	c.pending[seq] = call
 
 	return call
 }
@@ -329,13 +329,6 @@ func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 		reqs = append(reqs, req)
 	}
 
-	if err := c.enc.Encode(reqs); err != nil {
-		call.Error = err
-		call.Done <- call
-
-		return call
-	}
-
 	// All requests are mapped to the same call.
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
@@ -349,6 +342,17 @@ func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 
 	for _, seq := range seqs {
 		c.pending[seq] = call
+	}
+
+	if err := c.enc.Encode(reqs); err != nil {
+		call.Error = err
+		call.Done <- call
+
+		for _, seq := range seqs {
+			delete(c.pending, seq) // Remove the call from the pending map.
+		}
+
+		return call
 	}
 
 	return call

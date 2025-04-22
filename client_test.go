@@ -261,13 +261,25 @@ func TestClient_CallShouldReturnResult(t *testing.T) {
 
 	const result = 4.0
 
-	request := fmt.Sprintf(`{"jsonrpc":"2.0", "id":0, "result": %v}`+"\n", result)
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	request := jrpc.Response{
+		JSONRPC: jrpc.JSONRPCVersion,
+		ID:      getID(0),
+		Result:  result,
+	}
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -276,9 +288,16 @@ func TestClient_CallShouldReturnResult(t *testing.T) {
 	go c.Input(context.Background(), errCh)
 
 	go func() {
-		_, err := w.Write([]byte(request))
+		<-written
+
+		b, err := json.Marshal(request)
 		if err != nil {
-			errCh <- err
+			t.Errorf("Failed to marshal response: %v", err)
+		}
+
+		_, err = w.Write(b)
+		if err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
 		}
 	}()
 
@@ -305,13 +324,25 @@ func TestClient_CallShouldReturnResult(t *testing.T) {
 func TestClient_CallShouldReturnError(t *testing.T) {
 	t.Parallel()
 
-	response := `{"jsonrpc":"2.0", "id":0, "error": {"code": -32603, "message": "internal error"}}` + "\n"
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	response := jrpc.Response{
+		JSONRPC: jrpc.JSONRPCVersion,
+		ID:      getID(0),
+		Error:   &jrpc.Error{Code: jrpc.InternalError, Message: "internal error"},
+	}
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -320,9 +351,16 @@ func TestClient_CallShouldReturnError(t *testing.T) {
 	go c.Input(context.Background(), errCh)
 
 	go func() {
-		_, err := w.Write([]byte(response))
+		<-written
+
+		b, err := json.Marshal(response)
 		if err != nil {
-			errCh <- err
+			t.Errorf("Failed to marshal response: %v", err)
+		}
+
+		_, err = w.Write(b)
+		if err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
 		}
 	}()
 
@@ -355,14 +393,18 @@ func TestClient_CallShouldNotReturnAnResponseToANotification(t *testing.T) {
 	c := jrpc.NewClient(conn)
 	go c.Input(context.Background(), errCh)
 
-	call := c.Call(jrpc.Call("foo").Args("bar").Notify())
+	done := make(chan *jrpc.CallState)
+
+	go func() {
+		done <- c.Call(jrpc.Call("foo").Args("bar").Notify())
+	}()
 
 	select {
 	case <-time.After(1 * time.Second): // Timeout
 		t.Error("Expected call to be done, but it timed out")
 	case err := <-errCh:
 		t.Errorf("Failed handling request: %v", err)
-	default:
+	case call := <-done:
 		if call.Error != nil {
 			t.Errorf("Expected no error, got %v", call.Error)
 		}
