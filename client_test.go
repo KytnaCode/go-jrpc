@@ -496,6 +496,329 @@ func TestClient_CallShouldBeSafeForConcurrentUse(t *testing.T) {
 	}
 }
 
+func TestClient_CallBatchShouldReturnResult(t *testing.T) {
+	t.Parallel()
+
+	const result = 4.0
+
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	responses := []jrpc.Response{
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(0),
+			Result:  result,
+		},
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(1),
+			Result:  result,
+		},
+	}
+
+	r, w := io.Pipe()
+
+	written := make(chan struct{})
+
+	conn := &rwc{
+		Reader: r,
+		Writer: &signalWriter{done: written},
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	go func() {
+		<-written
+
+		b, err := json.Marshal(responses)
+		if err != nil {
+			errCh <- err
+		}
+
+		_, err = w.Write(b)
+		if err != nil {
+			errCh <- err
+		}
+	}()
+
+	call := c.CallBatch(
+		jrpc.Call("foo").Args("bar"),
+		jrpc.Call("baz").Args("qux"),
+	)
+
+	select {
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	default:
+		if call.Error != nil {
+			t.Errorf("Expected no error, got %v", call.Error)
+		}
+
+		if len(call.Result) != 2 {
+			t.Fatalf("Expected 2 results, got %d", len(call.Result))
+		}
+
+		for _, res := range call.Result {
+			if res.Error != nil {
+				t.Errorf("Expected no error, got %v", res.Error)
+			}
+
+			if res.Result != result {
+				t.Errorf("Expected %v, got %v", result, res.Result)
+			}
+		}
+	}
+}
+
+func TestClient_CallBatchShouldReturnAnBatchError(t *testing.T) {
+	t.Parallel()
+
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	responses := []jrpc.Response{
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(0),
+			Error:   &jrpc.Error{Code: jrpc.InternalError, Message: "internal error"},
+		},
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(1),
+			Error:   &jrpc.Error{Code: jrpc.MethodNotFound, Message: "method not found"},
+		},
+	}
+
+	r, w := io.Pipe()
+
+	written := make(chan struct{})
+
+	conn := &rwc{
+		Reader: r,
+		Writer: &signalWriter{done: written},
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	go func() {
+		<-written
+
+		b, err := json.Marshal(responses)
+		if err != nil {
+			errCh <- err
+		}
+
+		_, err = w.Write(b)
+		if err != nil {
+			errCh <- err
+		}
+	}()
+
+	call := c.CallBatch(
+		jrpc.Call("foo").Args("bar"),
+		jrpc.Call("baz").Args("qux"),
+	)
+
+	select {
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	default:
+		if call.Error == nil {
+			t.Fatal("Expected call to return an error")
+		}
+
+		if !errors.Is(call.Error, jrpc.ErrBatch) {
+			t.Fatalf("Expected batch error, got %v", call.Error)
+		}
+
+		if len(call.Result) != 2 {
+			t.Fatalf("Expected 2 results, got %d", len(call.Result))
+		}
+
+		for _, res := range call.Result {
+			if res.Error == nil {
+				t.Fatalf("Expected call to return an error, got %v", res)
+			}
+		}
+	}
+}
+
+func TestClient_CallBatchShouldNotReturnAnResponseToANotification(t *testing.T) {
+	t.Parallel()
+
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	response := []jrpc.Response{
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(0),
+			Result:  4.0,
+		},
+	}
+
+	r, w := io.Pipe()
+
+	written := make(chan struct{})
+
+	conn := &rwc{
+		Reader: r,
+		Writer: &signalWriter{done: written},
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	done := make(chan *jrpc.CallState)
+
+	go func() {
+		done <- c.CallBatch(
+			jrpc.Call("foo").Args("bar").Notify(), // notification
+			jrpc.Call("baz").Args("qux"),          // non-notification
+		)
+	}()
+
+	go func(t *testing.T) {
+		t.Helper()
+
+		<-written
+
+		fmt.Println("Writing response")
+
+		b, err := json.Marshal(response)
+		if err != nil {
+			t.Errorf("Failed to marshal response: %v", err)
+		}
+
+		if _, err := w.Write(b); err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
+		}
+	}(t)
+
+	select {
+	case err := <-errCh:
+		t.Errorf("Failed handling request: %v", err)
+	case call := <-done:
+		if call.Error != nil {
+			t.Errorf("Expected no error, got %v", call.Error)
+		}
+
+		if len(call.Result) != 1 {
+			t.Fatalf("Expected 1 result, got %d", len(call.Result))
+		}
+	}
+}
+
+func TestClient_CallBatchShouldBeSafeForConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	const n = 10
+
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, n))
+
+		return &id
+	}
+
+	responses := make([][]jrpc.Response, n)
+	for i := range n {
+		responses[i] = make([]jrpc.Response, n)
+		for j := range n {
+			responses[i][j] = jrpc.Response{
+				JSONRPC: jrpc.JSONRPCVersion,
+				ID:      getID(uint64(i*n + j)), //nolint:gosec
+				Result:  float64(i*n + j),
+			}
+		}
+	}
+
+	r, w := io.Pipe()
+
+	written := make(chan struct{})
+
+	conn := &rwc{
+		Reader: r,
+		Writer: &signalWriter{n: n - 1, done: written},
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	counter := &counter{}
+
+	calls := make([][]*jrpc.CallData, n)
+	for i := range n {
+		calls[i] = make([]*jrpc.CallData, n)
+		for j := range n {
+			calls[i][j] = jrpc.Call("foo").
+				GenID(counter).
+				Args(struct{ A int }{A: i*n + j}).
+				GetID(new(uint64))
+		}
+	}
+
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+
+	wg.Add(n)
+
+	for i := range n {
+		go func() {
+			defer wg.Done()
+			c.GoBatch(nil, calls[i]...)
+		}()
+	}
+
+	go func() {
+		<-written
+
+		for i := range n {
+			b, err := json.Marshal(responses[i])
+			if err != nil {
+				errCh <- err
+
+				continue
+			}
+
+			if _, err = w.Write(b); err != nil {
+				errCh <- fmt.Errorf("Failed to write to pipe: %w", err)
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case err := <-errCh:
+		t.Fatalf("Failed handling request: %v", err)
+	}
+}
+
 func TestClient_GoBatchShouldReturnResult(t *testing.T) {
 	t.Parallel()
 
