@@ -182,6 +182,8 @@ func (c *Client) Closed() <-chan struct{} {
 //	result := call.Result[0] // Single call, the result will have key 0.
 func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 	call := new(CallState)
+	call.ids = make(map[uint64]struct{}, 1)
+
 	if done == nil {
 		call.Done = make(chan *CallState, 1)
 	} else {
@@ -206,6 +208,7 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		req.ID = nil // Notification, no ID.
 	} else {
 		req.ID = &id
+		call.ids[seq] = struct{}{} // Store the ID of the request.
 	}
 
 	if data.args == nil {
@@ -277,6 +280,7 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 //	result2 := call.Result[id2] // Result of method2.
 func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 	call := new(CallState)
+	call.ids = make(map[uint64]struct{}, len(data))
 	call.Batch = true
 
 	if done != nil {
@@ -307,6 +311,8 @@ func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 			id := json.Number(strconv.FormatUint(seq, 10))
 
 			req.ID = &id
+
+			call.ids[seq] = struct{}{} // Store the ID of the request.
 
 			seqs = append(seqs, seq) // Store the ID of the request.
 		}
@@ -405,6 +411,64 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				errCh <- fmt.Errorf("empty JSON-RPC message: %w", ErrEmptyResponse)
 
 				continue
+			}
+
+			if !m.batch && m.res[0].ID == nil {
+				errCh <- resToError(m.res[0])
+
+				continue
+			}
+
+			if m.batch {
+				var missing bool
+
+				var batchID *uint64
+
+				// Check if an ID is missing in the batch response.
+				for _, res := range m.res {
+					if res.ID == nil {
+						errCh <- resToError(m.res[0])
+
+						missing = true
+
+						continue
+					}
+
+					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
+					if err != nil {
+						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+
+						missing = true
+					}
+
+					batchID = &id // If at least one ID is present, we can use it to find the call and resolve it.
+				}
+
+				// If at least one ID is present, resolve the call.
+				if missing && batchID != nil {
+					c.pendingMu.Lock()
+
+					call, ok := c.pending[*batchID]
+					if !ok {
+						continue
+					}
+
+					call.Error = fmt.Errorf(
+						"response contain null IDs, some requests may be invalid: %w",
+						ErrBatch,
+					)
+					call.Done <- call
+
+					for id := range call.ids {
+						delete(c.pending, id)
+					}
+				}
+
+				if missing {
+					errCh <- resToError(m.res[0])
+
+					continue
+				}
 			}
 
 			id, err := strconv.ParseUint(m.res[0].ID.String(), 10, 64)
@@ -578,6 +642,8 @@ type CallState struct {
 
 	// Done is a channel that will be closed when the call is done, and will contain the [CallState] itself.
 	Done chan *CallState
+
+	ids map[uint64]struct{}
 }
 
 // CallResult contains the result of a call to the server, if successful, the [CallResult.Error] will be nil, and
