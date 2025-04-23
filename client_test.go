@@ -1186,3 +1186,176 @@ func TestClient_InputShouldCancelPendingCalls(t *testing.T) {
 		t.Error("Expected call to be done, but it timed out")
 	}
 }
+
+func TestClient_InputShouldHandleNullIDOnSingleRequests(t *testing.T) {
+	t.Parallel()
+
+	responses := jrpc.Response{
+		JSONRPC: jrpc.JSONRPCVersion,
+		ID:      nil,
+		Error:   &jrpc.Error{Code: jrpc.ParseError, Message: "parse error"},
+	}
+
+	b, err := json.Marshal(responses)
+	if err != nil {
+		t.Fatalf("Failed to marshal response: %v", err)
+	}
+
+	conn := &rwc{
+		Reader: strings.NewReader(string(b)),
+		Writer: io.Discard,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(ctx, errCh)
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+
+		if !errors.Is(err, jrpc.ErrNullID) {
+			t.Errorf("Expected parse error, got %v", err)
+		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected error, but it timed out")
+	}
+}
+
+func TestClient_InputShouldHandleNullIDOnAllBatchRequests(t *testing.T) {
+	t.Parallel()
+
+	responses := []jrpc.Response{
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      nil,
+			Error:   &jrpc.Error{Code: jrpc.ParseError, Message: "parse error"},
+		},
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      nil,
+			Error:   &jrpc.Error{Code: jrpc.InvalidRequest, Message: "invalid requests"},
+		},
+	}
+
+	b, err := json.Marshal(responses)
+	if err != nil {
+		t.Fatalf("Failed to marshal response: %v", err)
+	}
+
+	conn := &rwc{
+		Reader: strings.NewReader(string(b)),
+		Writer: io.Discard,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(ctx, errCh)
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+
+		if !errors.Is(err, jrpc.ErrNullID) {
+			t.Errorf("Expected parse error, got %v", err)
+		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected error, but it timed out")
+	}
+}
+
+func TestClient_InputShouldHandleNullIDInSomeBatchRequests(t *testing.T) {
+	t.Parallel()
+
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
+
+		return &id
+	}
+
+	responses := []jrpc.Response{
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      nil,
+			Error:   &jrpc.Error{Code: jrpc.ParseError, Message: "parse error"},
+		},
+		{
+			JSONRPC: jrpc.JSONRPCVersion,
+			ID:      getID(1),
+			Result:  4.0,
+		},
+	}
+
+	r, w := io.Pipe()
+
+	written := make(chan struct{})
+
+	conn := &rwc{
+		Reader: r,
+		Writer: &signalWriter{done: written},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(ctx, errCh)
+
+	go func() {
+		<-written
+
+		b, err := json.Marshal(responses)
+		if err != nil {
+			t.Errorf("Failed to marshal response: %v", err)
+		}
+
+		if _, err := w.Write(b); err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
+		}
+	}()
+
+	call := c.GoBatch(nil,
+		jrpc.Call("foo").Args("bar"),
+		jrpc.Call("baz").Args("qux"),
+	)
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+
+		if !errors.Is(err, jrpc.ErrNullID) {
+			t.Errorf("Expected parse error, got %v", err)
+		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected error, but it timed out")
+	}
+
+	select {
+	case <-call.Done:
+		if call.Error == nil {
+			t.Fatal("Expected error, got nil")
+		}
+
+		if !errors.Is(call.Error, jrpc.ErrNullID) {
+			t.Errorf("Expected batch error, got %v", call.Error)
+		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected call to be done, but it timed out")
+	}
+}
