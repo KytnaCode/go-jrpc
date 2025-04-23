@@ -425,25 +425,26 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				var batchID *uint64
 
 				// Check if an ID is missing in the batch response.
+				nullIDCount := 0
 				for _, res := range m.res {
 					if res.ID == nil {
-						errCh <- resToError(m.res[0])
-
+						nullIDCount++
 						missing = true
-
 						continue
 					}
 
 					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
 						errCh <- fmt.Errorf("failed to parse ID: %w", err)
-
 						missing = true
 					}
 
 					batchID = &id // If at least one ID is present, we can use it to find the call and resolve it.
 				}
 
+				if nullIDCount > 0 {
+					errCh <- fmt.Errorf("batch response contains %d null IDs: %w", nullIDCount, ErrBatch)
+				}
 				// If at least one ID is present, resolve the call.
 				if missing && batchID != nil {
 					c.pendingMu.Lock()
