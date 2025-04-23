@@ -1220,7 +1220,7 @@ func TestClient_InputShouldHandleNullIDOnSingleRequests(t *testing.T) {
 			t.Fatal("Expected error, got nil")
 		}
 
-		if !errors.Is(err, jrpc.ErrParse) {
+		if !errors.Is(err, jrpc.ErrNullID) {
 			t.Errorf("Expected parse error, got %v", err)
 		}
 	case <-time.After(1 * time.Second): // Timeout
@@ -1268,7 +1268,7 @@ func TestClient_InputShouldHandleNullIDOnAllBatchRequests(t *testing.T) {
 			t.Fatal("Expected error, got nil")
 		}
 
-		if !errors.Is(err, jrpc.ErrParse) {
+		if !errors.Is(err, jrpc.ErrNullID) {
 			t.Errorf("Expected parse error, got %v", err)
 		}
 	case <-time.After(1 * time.Second): // Timeout
@@ -1339,7 +1339,7 @@ func TestClient_InputShouldHandleNullIDInSomeBatchRequests(t *testing.T) {
 			t.Fatal("Expected error, got nil")
 		}
 
-		if !errors.Is(err, jrpc.ErrParse) {
+		if !errors.Is(err, jrpc.ErrNullID) {
 			t.Errorf("Expected parse error, got %v", err)
 		}
 	case <-time.After(1 * time.Second): // Timeout
@@ -1352,7 +1352,7 @@ func TestClient_InputShouldHandleNullIDInSomeBatchRequests(t *testing.T) {
 			t.Fatal("Expected error, got nil")
 		}
 
-		if !errors.Is(call.Error, jrpc.ErrBatch) {
+		if !errors.Is(call.Error, jrpc.ErrNullID) {
 			t.Errorf("Expected batch error, got %v", call.Error)
 		}
 	case <-time.After(1 * time.Second): // Timeout

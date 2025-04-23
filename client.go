@@ -29,6 +29,13 @@ var (
 
 	// An error occurred in one or more requests in a batch call.
 	ErrBatch = errors.New("error in batch response")
+
+	// ErrNullID is returned when the server returned a response with a null ID. Returned from [Client.Input] error
+	// channel, single requests will remain pending, as is not possible to match the response with the request, for batch
+	// requests, if all requests have null IDs, the call will remain pending, but if at least one request has an ID, the
+	// client will try to match the response with the request, and the call will be marked as done with this error in
+	// [CallState].
+	ErrNullID = errors.New("response contain null ID(s)")
 )
 
 // Client represents a JSON-RPC client, it is used to make calls to the server, is necessary to call [Client.Input]
@@ -414,7 +421,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 			}
 
 			if !m.batch && m.res[0].ID == nil {
-				errCh <- resToError(m.res[0])
+				errCh <- ErrNullID
 
 				continue
 			}
@@ -426,16 +433,19 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 				// Check if an ID is missing in the batch response.
 				nullIDCount := 0
+
 				for _, res := range m.res {
 					if res.ID == nil {
 						nullIDCount++
 						missing = true
+
 						continue
 					}
 
 					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
 						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+
 						missing = true
 					}
 
@@ -443,8 +453,9 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				}
 
 				if nullIDCount > 0 {
-					errCh <- fmt.Errorf("batch response contains %d null IDs: %w", nullIDCount, ErrBatch)
+					errCh <- fmt.Errorf("batch response contains %d null IDs: %w", nullIDCount, ErrNullID)
 				}
+
 				// If at least one ID is present, resolve the call.
 				if missing && batchID != nil {
 					c.pendingMu.Lock()
@@ -456,7 +467,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 					call.Error = fmt.Errorf(
 						"response contain null IDs, some requests may be invalid: %w",
-						ErrBatch,
+						ErrNullID,
 					)
 					call.Done <- call
 
