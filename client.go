@@ -635,8 +635,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// Closed returns a channel that will be closed when the client is closed, and all pending calls are done. If arleady
-// closed, the channel will be return immediately.
+// Closed returns a channel that will be closed when the client is closed, and all pending calls are done. If already
+// closed, the channel will be returned immediately.
 func (c *Client) Closed() bool {
 	return c.closed.Load()
 }
