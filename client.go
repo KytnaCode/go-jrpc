@@ -233,9 +233,7 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		*req.Params = json.RawMessage(params)
 	}
 
-	if data.notify {
-		call.Done <- call
-	} else {
+	if !data.notify {
 		// Store the call in the pending map.
 		c.pendingMu.Lock()
 		defer c.pendingMu.Unlock()
@@ -411,9 +409,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 			err = fmt.Errorf("context cancelled: %w", ctx.Err())
 		default:
 			if err = c.dec.Decode(&m); err != nil {
-				if !errors.Is(err, io.EOF) {
-					errCh <- fmt.Errorf("failed to decode message: %w", err)
-				}
+				errCh <- fmt.Errorf("failed to decode message: %w", err)
 
 				continue
 			}
@@ -466,6 +462,8 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 					call, ok := c.pending[*batchID]
 					if !ok {
+						c.pendingMu.Unlock()
+
 						continue
 					}
 
@@ -478,6 +476,8 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 					for id := range call.ids {
 						delete(c.pending, id)
 					}
+
+					c.pendingMu.Unlock()
 				}
 
 				if missing {
