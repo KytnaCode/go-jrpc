@@ -194,6 +194,39 @@ func TestClient_GoShouldNotReturnAnResponseToANotification(t *testing.T) {
 	}
 }
 
+func TestClient_GoShouldReturnAnErrorOnArleadyClosedClient(t *testing.T) {
+	t.Parallel()
+
+	conn := &rwc{
+		Reader: &test.NoOpReader{},
+		Writer: io.Discard,
+	}
+
+	errCh := make(chan error, 1)
+
+	c := jrpc.NewClient(conn)
+	go c.Input(context.Background(), errCh)
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Failed to close client: %v", err)
+	}
+
+	call := c.Go(nil, jrpc.Call("foo").Args("bar"))
+
+	select {
+	case <-call.Done:
+		if call.Error == nil {
+			t.Fatal("Expected call to return an error")
+		}
+
+		if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
+			t.Fatalf("Expected client shutdown error, got %v", call.Error)
+		}
+	case <-time.After(1 * time.Second): // Timeout
+		t.Error("Expected call to be done, but it timed out")
+	}
+}
+
 func TestClient_GoShouldBeSafeForConcurrentUse(t *testing.T) {
 	t.Parallel()
 
@@ -1160,17 +1193,24 @@ func TestClient_InputShouldCloseConn(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 
+	errCh := make(chan error, 1)
+
 	c := jrpc.NewClient(conn)
-	go c.Input(ctx, nil)
+	go c.Input(ctx, errCh)
 
 	cancel()
 
-	select {
-	case <-c.Closed():
-	case <-time.After(time.Second):
-		if !conn.closed.Load() {
-			t.Error("Expected conn to be closed, but it wasn't")
-		}
+	err := <-errCh
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected context canceled error, got %v", err)
+	}
+
+	if !c.Closed() {
+		t.Error("Expected conn to be closed, but it wasn't")
 	}
 }
 
