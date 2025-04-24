@@ -9,17 +9,19 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kytnacode/go-jrpc"
+	"github.com/kytnacode/go-jrpc/internal/test"
 )
 
 type rwc struct {
 	io.Reader
 	io.Writer
 
-	closed bool
+	closed atomic.Bool
 }
 
 type signalWriter struct {
@@ -54,8 +56,24 @@ func (c *counter) Next() uint64 {
 	return c.n - 1
 }
 
+func (rwc *rwc) Write(p []byte) (n int, err error) {
+	if rwc.closed.Load() {
+		return 0, io.EOF
+	}
+
+	return rwc.Writer.Write(p) //nolint:wrapcheck
+}
+
+func (rwc *rwc) Read(p []byte) (n int, err error) {
+	if rwc.closed.Load() {
+		return 0, io.EOF
+	}
+
+	return rwc.Reader.Read(p) //nolint:wrapcheck
+}
+
 func (rwc *rwc) Close() error {
-	rwc.closed = true
+	rwc.closed.Store(true)
 
 	return nil
 }
@@ -156,7 +174,7 @@ func TestClient_GoShouldNotReturnAnResponseToANotification(t *testing.T) {
 	done := make(chan struct{})
 
 	conn := &rwc{
-		Reader: strings.NewReader(""),
+		Reader: &test.NoOpReader{},
 		Writer: &signalWriter{done: done},
 	}
 
@@ -384,7 +402,7 @@ func TestClient_CallShouldNotReturnAnResponseToANotification(t *testing.T) {
 	t.Parallel()
 
 	conn := &rwc{
-		Reader: strings.NewReader(""),
+		Reader: &test.NoOpReader{},
 		Writer: io.Discard,
 	}
 
@@ -1150,7 +1168,7 @@ func TestClient_InputShouldCloseConn(t *testing.T) {
 	select {
 	case <-c.Closed():
 	case <-time.After(time.Second):
-		if !conn.closed {
+		if !conn.closed.Load() {
 			t.Error("Expected conn to be closed, but it wasn't")
 		}
 	}
@@ -1159,31 +1177,34 @@ func TestClient_InputShouldCloseConn(t *testing.T) {
 func TestClient_InputShouldCancelPendingCalls(t *testing.T) {
 	t.Parallel()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
-		Reader: strings.NewReader(""),
-		Writer: io.Discard,
+		Reader: &test.NoOpReader{},
+		Writer: &signalWriter{done: written},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 
+	errCh := make(chan error, 1)
+
 	c := jrpc.NewClient(conn)
-	go c.Input(ctx, nil)
+	go c.Input(ctx, errCh)
 
 	call := c.Go(nil, jrpc.Call("foo").Args("bar"))
 
+	<-written
+
 	cancel()
 
-	select {
-	case <-call.Done:
-		if call.Error == nil {
-			t.Fatal("Expected error, got nil")
-		}
+	<-call.Done
 
-		if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
-			t.Errorf("Expected client shutdown error, got %v", call.Error)
-		}
-	case <-time.After(1 * time.Second): // Timeout
-		t.Error("Expected call to be done, but it timed out")
+	if call.Error == nil {
+		t.Fatal("Expected error, got nil")
+	}
+
+	if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
+		t.Errorf("Expected client shutdown error, got %v", call.Error)
 	}
 }
 
