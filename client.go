@@ -174,7 +174,6 @@ func (c *Client) CallBatch(data ...*CallData) *CallState {
 //	result := call.Result[0] // Single call, the result will have key 0.
 func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 	call := new(CallState)
-	call.ids = make(map[uint64]struct{}, 1)
 
 	if done == nil {
 		call.Done = make(chan *CallState, 1)
@@ -230,16 +229,19 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 	if !data.notify {
 		// Store the call in the pending map.
 		c.pendingMu.Lock()
-		defer c.pendingMu.Unlock()
 
 		if c.Closed() {
 			call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
 			call.Done <- call
 
+			c.pendingMu.Unlock()
+
 			return call
 		}
 
 		c.pending[seq] = call
+
+		c.pendingMu.Unlock()
 	}
 
 	// Send the request to the server.
@@ -247,7 +249,11 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		call.Error = err
 		call.Done <- call
 
+		c.pendingMu.Lock()
+
 		delete(c.pending, seq) // Remove the call from the pending map.
+
+		c.pendingMu.Unlock()
 
 		return call
 	}
@@ -384,6 +390,12 @@ func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 //	    // Handle errors
 //	}
 func (c *Client) Input(ctx context.Context, errCh chan error) {
+	sendErr := func(err error) {
+		if errCh != nil {
+			errCh <- err
+		}
+	}
+
 	var m msg
 
 	var err error
@@ -392,9 +404,9 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 		<-ctx.Done()
 
 		if err := c.Close(); err != nil {
-			errCh <- fmt.Errorf("failed to close client: %w", err)
+			sendErr(fmt.Errorf("failed to close client: %w", err))
 		} else {
-			errCh <- fmt.Errorf("context cancelled: %w", ctx.Err())
+			sendErr(fmt.Errorf("context cancelled: %w", ctx.Err()))
 		}
 	}()
 
@@ -404,19 +416,19 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 			err = fmt.Errorf("context cancelled: %w", ctx.Err())
 		default:
 			if err = c.dec.Decode(&m); err != nil {
-				errCh <- fmt.Errorf("failed to decode message: %w", err)
+				sendErr(fmt.Errorf("failed to decode message: %w", err))
 
 				continue
 			}
 
 			if len(m.res) == 0 {
-				errCh <- fmt.Errorf("empty JSON-RPC message: %w", ErrEmptyResponse)
+				sendErr(fmt.Errorf("empty JSON-RPC message: %w", ErrEmptyResponse))
 
 				continue
 			}
 
 			if !m.batch && m.res[0].ID == nil {
-				errCh <- ErrNullID
+				sendErr(ErrNullID)
 
 				continue
 			}
@@ -439,7 +451,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
-						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+						sendErr(fmt.Errorf("failed to parse ID: %w", err))
 
 						missing = true
 					}
@@ -448,7 +460,13 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				}
 
 				if nullIDCount > 0 {
-					errCh <- fmt.Errorf("batch response contains %d null IDs: %w", nullIDCount, ErrNullID)
+					sendErr(
+						fmt.Errorf(
+							"batch response contains %d null IDs: %w",
+							nullIDCount,
+							ErrNullID,
+						),
+					)
 				}
 
 				// If at least one ID is present, resolve the call.
@@ -476,7 +494,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				}
 
 				if missing {
-					errCh <- resToError(m.res[0])
+					sendErr(resToError(m.res[0]))
 
 					continue
 				}
@@ -484,7 +502,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 			id, err := strconv.ParseUint(m.res[0].ID.String(), 10, 64)
 			if err != nil {
-				errCh <- fmt.Errorf("failed to parse ID: %w", err)
+				sendErr(fmt.Errorf("failed to parse ID: %w", err))
 
 				continue
 			}
@@ -499,7 +517,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 					if err != nil {
 						call.Done <- call
 
-						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+						sendErr(fmt.Errorf("failed to parse ID: %w", err))
 						c.pendingMu.Unlock()
 
 						continue
@@ -508,7 +526,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 					delete(c.pending, id)
 				}
 			} else {
-				errCh <- fmt.Errorf("failed to find call with ID %d: %w", id, ErrUnmatchedCall)
+				sendErr(fmt.Errorf("failed to find call with ID %d: %w", id, ErrUnmatchedCall))
 				c.pendingMu.Unlock()
 
 				continue
@@ -534,7 +552,7 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 				if m.batch {
 					id, err = strconv.ParseUint(res.ID.String(), 10, 64)
 					if err != nil {
-						errCh <- fmt.Errorf("failed to parse ID: %w", err)
+						sendErr(fmt.Errorf("failed to parse ID: %w", err))
 
 						batchErr = true
 						results[id] = CallResult{
@@ -573,22 +591,20 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 	// Close the connection and mark all pending calls as done.
 	c.pendingMu.Lock()
 
-	responded := make(map[*CallState]struct{}, len(c.pending))
-
-	for id, call := range c.pending {
+	for _, call := range c.pending {
 		// Batch calls are mapped to the same call, so we only need to close the call once.
-		if _, ok := responded[call]; !ok {
-			call.Error = fmt.Errorf("failed to close connection: %w", ErrClientShutdown)
-			call.Done <- call
-		}
+		call.Error = fmt.Errorf("failed to close connection: %w", ErrClientShutdown)
+		call.Done <- call
 
-		delete(c.pending, id)
+		for id := range call.ids {
+			delete(c.pending, id)
+		}
 	}
 
 	c.pendingMu.Unlock()
 
 	if err := c.Close(); err != nil {
-		errCh <- fmt.Errorf("failed to close client: %w", err)
+		sendErr(fmt.Errorf("failed to close client: %w", err))
 	}
 }
 
