@@ -87,7 +87,7 @@ func GenTestCases(aspects ...Aspect) map[string]map[string]any {
 	comb := 1
 
 	testCases := make(map[string]map[string]any, comb)
-	values := make([]AspectValue, n)
+	values := make([]AspectValue, 0, n)
 
 	genTestCases("", values, testCases, aspects...)
 
