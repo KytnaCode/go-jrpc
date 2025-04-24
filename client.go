@@ -224,7 +224,7 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		params, err := json.Marshal(data.args)
 		if err != nil {
 			call.Error = err
-			done <- call
+			call.Done <- call
 
 			return call
 		}
@@ -258,6 +258,10 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		delete(c.pending, seq) // Remove the call from the pending map.
 
 		return call
+	}
+
+	if data.notify {
+		call.Done <- call
 	}
 
 	return call
