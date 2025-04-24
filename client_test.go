@@ -194,7 +194,7 @@ func TestClient_GoShouldNotReturnAnResponseToANotification(t *testing.T) {
 	}
 }
 
-func TestClient_GoShouldReturnAnErrorOnArleadyClosedClient(t *testing.T) {
+func TestClient_GoShouldReturnAnErrorOnAlreadyClosedClient(t *testing.T) {
 	t.Parallel()
 
 	conn := &rwc{
