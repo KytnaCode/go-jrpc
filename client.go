@@ -71,9 +71,8 @@ type Client struct {
 	pendingMu sync.Mutex
 	pending   map[uint64]*CallState
 
-	closeCh    chan struct{}
 	closedOnce sync.Once
-	closed     bool
+	closed     atomic.Bool
 }
 
 // NewClient creates a new [Client] over the given connection, the client may call conn methods concurrently. The
@@ -93,7 +92,6 @@ func NewClient(conn io.ReadWriteCloser) *Client {
 		enc:     json.NewEncoder(conn),
 		dec:     json.NewDecoder(conn),
 		pending: make(map[uint64]*CallState),
-		closeCh: make(chan struct{}, 1),
 	}
 }
 
@@ -157,19 +155,6 @@ func (c *Client) CallBatch(data ...*CallData) *CallState {
 	return <-call.Done // Wait for the call to finish.
 }
 
-// Closed returns a channel that will be closed when the client is closed, and all pending calls are done. If arleady
-// closed, the channel will be return immediately.
-func (c *Client) Closed() <-chan struct{} {
-	ch := make(chan struct{})
-
-	go func() {
-		<-c.closeCh
-		close(ch)
-	}()
-
-	return ch
-}
-
 // Go makes an asynchronous non-batch call to the server, and returns a [CallState] object. If done is nil, a new
 // channel will be allocated, if non-nil, done must be buffered.
 //
@@ -196,6 +181,15 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 	} else {
 		call.Done = done
 	}
+
+	if c.Closed() {
+		call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
+		call.Done <- call
+
+		return call
+	}
+
+	call.ids = make(map[uint64]struct{}, 1)
 
 	var req Request
 	req.JSONRPC = JSONRPCVersion
@@ -238,7 +232,7 @@ func (c *Client) Go(done chan *CallState, data *CallData) *CallState {
 		c.pendingMu.Lock()
 		defer c.pendingMu.Unlock()
 
-		if c.closed {
+		if c.Closed() {
 			call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
 			call.Done <- call
 
@@ -348,7 +342,7 @@ func (c *Client) GoBatch(done chan *CallState, data ...*CallData) *CallState {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
-	if c.closed {
+	if c.Closed() {
 		call.Error = fmt.Errorf("failed to send the request: %w", ErrClientShutdown)
 		call.Done <- call
 
@@ -397,9 +391,10 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 	go func() {
 		<-ctx.Done()
 
-		err := c.conn.Close()
-		if err != nil {
-			errCh <- fmt.Errorf("failed to close connection: %w", err)
+		if err := c.Close(); err != nil {
+			errCh <- fmt.Errorf("failed to close client: %w", err)
+		} else {
+			errCh <- fmt.Errorf("context cancelled: %w", ctx.Err())
 		}
 	}()
 
@@ -577,9 +572,8 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 	// Close the connection and mark all pending calls as done.
 	c.pendingMu.Lock()
-	defer c.pendingMu.Unlock()
 
-	responded := make(map[*CallState]struct{})
+	responded := make(map[*CallState]struct{}, len(c.pending))
 
 	for id, call := range c.pending {
 		// Batch calls are mapped to the same call, so we only need to close the call once.
@@ -589,14 +583,13 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 		}
 
 		delete(c.pending, id)
-
-		responded[call] = struct{}{}
 	}
 
-	c.closedOnce.Do(func() {
-		close(c.closeCh)
-		c.closed = true
-	})
+	c.pendingMu.Unlock()
+
+	if err := c.Close(); err != nil {
+		errCh <- fmt.Errorf("failed to close client: %w", err)
+	}
 }
 
 // MakeCall behaves like [Call] but sets the generator to an autoincrementing ID:
@@ -610,6 +603,42 @@ func (c *Client) MakeCall(method string) *CallData {
 // Next returns an incrementing ID starting from 0. Implements [Generator].
 func (c *Client) Next() uint64 {
 	return c.seq.Add(1) - 1
+}
+
+// Close closes the connection to the server, and marks all pending calls as done. If the connection is already
+// closed, it will do nothing.
+func (c *Client) Close() error {
+	var err error
+
+	c.closedOnce.Do(func() {
+		c.closed.Store(true)
+
+		err = c.conn.Close()
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to close connection: %w", err)
+	}
+
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+
+	for _, call := range c.pending {
+		call.Error = fmt.Errorf("failed to complete call: %w", ErrClientShutdown)
+		call.Done <- call
+
+		for id := range call.ids {
+			delete(c.pending, id) // Remove the call from the pending map.
+		}
+	}
+
+	return nil
+}
+
+// Closed returns a channel that will be closed when the client is closed, and all pending calls are done. If already
+// closed, the channel will be returned immediately.
+func (c *Client) Closed() bool {
+	return c.closed.Load()
 }
 
 // Generator defines the interface for generate IDs for the calls. The [Client] implements this interface.
