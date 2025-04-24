@@ -47,13 +47,11 @@ func (w *signalWriter) Write(_ []byte) (n int, err error) {
 }
 
 type counter struct {
-	n uint64
+	n atomic.Uint64
 }
 
 func (c *counter) Next() uint64 {
-	c.n++
-
-	return c.n - 1
+	return c.n.Add(1) - 1
 }
 
 func (rwc *rwc) Write(p []byte) (n int, err error) {
