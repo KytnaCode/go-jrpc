@@ -76,152 +76,479 @@ func (rwc *rwc) Close() error {
 	return nil
 }
 
+const (
+	genKey    = "generator"
+	doneKey   = "done-channel"
+	paramsKey = "params"
+)
+
+func genGoTestCases() map[string]map[string]any {
+	testCases := test.GenTestCases(
+		test.NewAspect(genKey,
+			test.NewValue("default-generator", nil),
+			test.CreateValue("custom-generator", func() any { return &counter{} }),
+		),
+		test.NewAspect(paramsKey,
+			test.NewValue("nil-params", nil),
+			test.NewValue("non-nil-params", struct{ A int }{A: 4}),
+		),
+		test.NewAspect(
+			doneKey,
+			test.NewValue("nil-done-channel", nil),
+			test.CreateValue(
+				"non-nil-done-channel",
+				func() any { return make(chan *jrpc.CallState, 1) },
+			),
+		),
+	)
+
+	return testCases
+}
+
 func TestClient_GoShouldReturnResult(t *testing.T) {
 	t.Parallel()
 
+	testCases := genGoTestCases()
+
 	const result = 4.0
 
-	request := fmt.Sprintf(`{"jsonrpc":"2.0", "id":0, "result": %v}`+"\n", result)
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
 
-	r, w := io.Pipe()
-
-	conn := &rwc{
-		Reader: r,
-		Writer: io.Discard,
+		return &id
 	}
 
-	errCh := make(chan error, 1)
+	response := jrpc.Response{
+		JSONRPC: jrpc.JSONRPCVersion,
+		ID:      getID(0),
+		Result:  result,
+	}
 
-	c := jrpc.NewClient(conn)
-	go c.Input(context.Background(), errCh)
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	call := c.Go(nil, jrpc.Call("foo").Args("bar"))
+			r, w := io.Pipe()
 
-	go func() {
-		_, err := w.Write([]byte(request))
-		if err != nil {
-			errCh <- err
-		}
-	}()
+			written := make(chan struct{})
 
-	select {
-	case <-call.Done:
-		if call.Error != nil {
-			t.Errorf("Expected no error, got %v", call.Error)
-		}
+			conn := &rwc{
+				Reader: r,
+				Writer: &signalWriter{done: written},
+			}
 
-		if call.Result[0].Error != nil {
-			t.Errorf("Expected no error, got %v", call.Result[0].Error)
-		}
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
 
-		if call.Result[0].Result != result {
-			t.Errorf("Expected %v, got %v", result, call.Result[0].Result)
-		}
-	case <-time.After(1 * time.Second): // Timeout
-		t.Error("Expected call to be done, but it timed out")
-	case err := <-errCh:
-		t.Errorf("Error handling request: %v", err)
+			errCh := make(chan error, 1)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(ctx, errCh)
+
+			callData := jrpc.Call("foo").Args(data[paramsKey])
+
+			if data[genKey] != nil {
+				callData.GenID(data[genKey].(jrpc.Generator))
+			}
+
+			var call *jrpc.CallState
+
+			if data[doneKey] != nil {
+				call = c.Go(data[doneKey].(chan *jrpc.CallState), callData)
+			} else {
+				call = c.Go(nil, callData)
+			}
+
+			go func() {
+				<-written
+
+				b, err := json.Marshal(response)
+				if err != nil {
+					errCh <- err
+				}
+
+				_, err = w.Write(b)
+				if err != nil {
+					errCh <- err
+				}
+			}()
+
+			select {
+			case <-call.Done:
+				if call.Error != nil {
+					t.Errorf("Expected no error, got %v", call.Error)
+				}
+
+				if call.Result[0].Error != nil {
+					t.Errorf("Expected no error, got %v", call.Result[0].Error)
+				}
+
+				if call.Result[0].Result != result {
+					t.Errorf("Expected %v, got %v", result, call.Result[0].Result)
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			case err := <-errCh:
+				t.Errorf("Error handling request: %v", err)
+			}
+		})
 	}
 }
 
 func TestClient_GoShouldReturnError(t *testing.T) {
 	t.Parallel()
 
-	response := `{"jsonrpc":"2.0", "id":0, "error": {"code": -32603, "message": "internal error"}}` + "\n"
+	getID := func(i uint64) *json.Number {
+		id := json.Number(strconv.FormatUint(i, 10))
 
-	r, w := io.Pipe()
-
-	conn := &rwc{
-		Reader: r,
-		Writer: io.Discard,
+		return &id
 	}
 
-	errCh := make(chan error, 1)
+	response := jrpc.Response{
+		JSONRPC: jrpc.JSONRPCVersion,
+		ID:      getID(0),
+		Error:   &jrpc.Error{Code: jrpc.InternalError, Message: "internal error"},
+	}
 
-	c := jrpc.NewClient(conn)
-	go c.Input(context.Background(), errCh)
+	testCases := genGoTestCases()
 
-	call := c.Go(nil, jrpc.Call("foo").Args("bar"))
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	go func() {
-		_, err := w.Write([]byte(response))
-		if err != nil {
-			errCh <- err
-		}
-	}()
+			r, w := io.Pipe()
 
-	select {
-	case <-call.Done:
-		if call.Error == nil {
-			t.Fatal("Expected call to return an error")
-		}
+			written := make(chan struct{})
 
-		if !errors.Is(call.Error, jrpc.ErrInternalError) {
-			t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
-		}
-	case <-time.After(1 * time.Second): // Timeout
-		t.Error("Expected call to be done, but it timed out")
-	case err := <-errCh:
-		t.Errorf("Failed handling request: %v", err)
+			conn := &rwc{
+				Reader: r,
+				Writer: &signalWriter{done: written},
+			}
+
+			errCh := make(chan error, 1)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(context.Background(), errCh)
+
+			callData := jrpc.Call("foo").Args(data[paramsKey])
+
+			if data[genKey] != nil {
+				callData.GenID(data[genKey].(jrpc.Generator))
+			}
+
+			var call *jrpc.CallState
+
+			if data[doneKey] != nil {
+				call = c.Go(data[doneKey].(chan *jrpc.CallState), callData)
+			} else {
+				call = c.Go(nil, callData)
+			}
+
+			go func() {
+				<-written
+
+				b, err := json.Marshal(response)
+				if err != nil {
+					t.Errorf("Failed to marshal response: %v", err)
+				}
+
+				_, err = w.Write(b)
+				if err != nil {
+					t.Errorf("Failed to write to pipe: %v", err)
+				}
+			}()
+
+			select {
+			case <-call.Done:
+				if call.Error == nil {
+					t.Fatal("Expected call to return an error")
+				}
+
+				if !errors.Is(call.Error, jrpc.ErrInternalError) {
+					t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			case err := <-errCh:
+				t.Errorf("Failed handling request: %v", err)
+			}
+		})
 	}
 }
 
 func TestClient_GoShouldNotReturnAnResponseToANotification(t *testing.T) {
 	t.Parallel()
 
-	done := make(chan struct{})
+	testCases := genGoTestCases()
 
-	conn := &rwc{
-		Reader: &test.NoOpReader{},
-		Writer: &signalWriter{done: done},
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			conn := &rwc{
+				Reader: &test.NoOpReader{},
+				Writer: io.Discard,
+			}
+
+			errCh := make(chan error, 1)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(context.Background(), errCh)
+
+			callData := jrpc.Call("foo").Args(data[paramsKey]).Notify()
+
+			if data[genKey] != nil {
+				callData.GenID(data[genKey].(jrpc.Generator))
+			}
+
+			var done chan *jrpc.CallState
+
+			if data[doneKey] != nil {
+				done = data[doneKey].(chan *jrpc.CallState)
+			}
+
+			call := c.Go(done, callData)
+
+			select {
+			case <-call.Done:
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			case err := <-errCh:
+				t.Errorf("Failed handling request: %v", err)
+			}
+		})
 	}
+}
 
-	errCh := make(chan error, 1)
+func TestClient_GoShouldReturnAnErrorOnClosedClient(t *testing.T) {
+	t.Parallel()
 
-	c := jrpc.NewClient(conn)
-	go c.Input(context.Background(), errCh)
+	testCases := genGoTestCases()
 
-	c.Go(nil, jrpc.Call("foo").Args("bar").Notify())
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second): // Timeout
-		t.Error("Expected call to be done, but it timed out")
-	case err := <-errCh:
-		t.Errorf("Failed handling request: %v", err)
+			written := make(chan struct{})
+
+			conn := &rwc{
+				Reader: &test.NoOpReader{},
+				Writer: &signalWriter{done: written},
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(ctx, nil)
+
+			var doneCh chan *jrpc.CallState
+
+			if data[doneKey] != nil {
+				doneCh = data[doneKey].(chan *jrpc.CallState)
+			}
+
+			callData := jrpc.Call("foo").Args(data[paramsKey])
+
+			if data[genKey] != nil {
+				callData.GenID(data[genKey].(jrpc.Generator))
+			}
+
+			call := c.Go(doneCh, callData)
+
+			go func() {
+				<-written
+
+				cancel()
+			}()
+
+			select {
+			case <-call.Done:
+				if call.Error == nil {
+					t.Fatal("Expected call to return an error")
+				}
+
+				if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
+					t.Fatalf("Expected client shutdown error, got %v", call.Error)
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			}
+		})
+	}
+}
+
+func TestClient_GoShouldReturnAnErrorOnArleadyClosedClient(t *testing.T) {
+	t.Parallel()
+
+	testCases := genGoTestCases()
+
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			conn := &rwc{
+				Reader: &test.NoOpReader{},
+				Writer: io.Discard,
+			}
+
+			errCh := make(chan error, 1)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(context.Background(), errCh)
+
+			var doneCh chan *jrpc.CallState
+
+			if data[doneKey] != nil {
+				doneCh = data[doneKey].(chan *jrpc.CallState)
+			}
+
+			callData := jrpc.Call("foo").Args(data[paramsKey])
+
+			if data[genKey] != nil {
+				callData.GenID(data[genKey].(jrpc.Generator))
+			}
+
+			if err := c.Close(); err != nil {
+				t.Fatalf("Failed to close client: %v", err)
+			}
+
+			call := c.Go(doneCh, callData)
+
+			select {
+			case <-call.Done:
+				if call.Error == nil {
+					t.Fatal("Expected call to return an error")
+				}
+
+				if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
+					t.Fatalf("Expected client shutdown error, got %v", call.Error)
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			}
+
+			select {
+			case err := <-errCh:
+				if err == nil {
+					t.Fatal("Expected call to return an error")
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			}
+		})
+	}
+}
+
+func TestClient_GoShouldReturnAnErrorOnClosedConnection(t *testing.T) {
+	t.Parallel()
+
+	testCases := genGoTestCases()
+
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			conn := &rwc{
+				Reader: &test.NoOpReader{},
+				Writer: io.Discard,
+			}
+
+			errCh := make(chan error, 1)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(context.Background(), errCh)
+
+			var doneCh chan *jrpc.CallState
+
+			if data[doneKey] != nil {
+				doneCh = data[doneKey].(chan *jrpc.CallState)
+			}
+
+			callData := jrpc.Call("foo").Args(data[paramsKey])
+
+			if data[genKey] != nil {
+				callData.GenID(data[genKey].(jrpc.Generator))
+			}
+
+			call := c.Go(doneCh, callData)
+
+			if err := conn.Close(); err != nil {
+				t.Fatalf("Failed to close connection: %v", err)
+			}
+
+			select {
+			case <-call.Done:
+				if call.Error == nil {
+					t.Fatal("Expected call to return an error")
+				}
+
+				if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
+					t.Fatalf("Expected client shutdown error, got %v", call.Error)
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			}
+
+			select {
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected errCh to return an error, but it timed out")
+			case err := <-errCh:
+				if err == nil {
+					t.Fatal("Expected call to return an error")
+				}
+			}
+		})
 	}
 }
 
 func TestClient_GoShouldReturnAnErrorOnAlreadyClosedClient(t *testing.T) {
 	t.Parallel()
 
-	conn := &rwc{
-		Reader: &test.NoOpReader{},
-		Writer: io.Discard,
-	}
+	testCases := genGoTestCases()
 
-	errCh := make(chan error, 1)
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	c := jrpc.NewClient(conn)
-	go c.Input(context.Background(), errCh)
+			conn := &rwc{
+				Reader: &test.NoOpReader{},
+				Writer: io.Discard,
+			}
 
-	if err := c.Close(); err != nil {
-		t.Fatalf("Failed to close client: %v", err)
-	}
+			errCh := make(chan error, 1)
 
-	call := c.Go(nil, jrpc.Call("foo").Args("bar"))
+			c := jrpc.NewClient(conn)
+			go c.Input(context.Background(), errCh)
 
-	select {
-	case <-call.Done:
-		if call.Error == nil {
-			t.Fatal("Expected call to return an error")
-		}
+			if err := c.Close(); err != nil {
+				t.Fatalf("Failed to close client: %v", err)
+			}
 
-		if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
-			t.Fatalf("Expected client shutdown error, got %v", call.Error)
-		}
-	case <-time.After(1 * time.Second): // Timeout
-		t.Error("Expected call to be done, but it timed out")
+			var doneCh chan *jrpc.CallState
+			if data[doneKey] != nil {
+				doneCh = data[doneKey].(chan *jrpc.CallState)
+			}
+
+			var gen jrpc.Generator
+			if data[genKey] != nil {
+				gen = data[genKey].(jrpc.Generator)
+			}
+
+			call := c.Go(doneCh, jrpc.Call("foo").Args(data[paramsKey]).GenID(gen))
+
+			select {
+			case <-call.Done:
+				if call.Error == nil {
+					t.Fatal("Expected call to return an error")
+				}
+
+				if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
+					t.Fatalf("Expected client shutdown error, got %v", call.Error)
+				}
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			}
+		})
 	}
 }
 
@@ -236,72 +563,93 @@ func TestClient_GoShouldBeSafeForConcurrentUse(t *testing.T) {
 		return &id
 	}
 
-	responses := make([]jrpc.Response, n)
+	responses := make([][]byte, n)
+
 	for i := range n {
-		responses[i] = jrpc.Response{
+		res := jrpc.Response{
 			JSONRPC: jrpc.JSONRPCVersion,
 			ID:      getID(uint64(i)), //nolint:gosec
 			Result:  float64(i),
 		}
-	}
 
-	r, w := io.Pipe()
-
-	written := make(chan struct{})
-
-	conn := &rwc{
-		Reader: r,
-		Writer: &signalWriter{n: n - 1, done: written},
-	}
-
-	errCh := make(chan error, 1)
-
-	c := jrpc.NewClient(conn)
-	go c.Input(context.Background(), errCh)
-
-	done := make(chan struct{})
-
-	var wg sync.WaitGroup
-
-	wg.Add(n)
-
-	for range n {
-		go func() {
-			<-c.Go(nil, jrpc.Call("foo").Args("bar")).Done
-
-			wg.Done()
-		}()
-	}
-
-	<-written
-
-	go func() {
-		for i := range n {
-			b, err := json.Marshal(responses[i])
-			if err != nil {
-				errCh <- err
-
-				continue
-			}
-
-			_, err = w.Write(b)
-			if err != nil {
-				errCh <- err
-			}
+		b, err := json.Marshal(res)
+		if err != nil {
+			t.Fatalf("Failed to marshal response: %v", err)
 		}
-	}()
 
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
+		responses[i] = b
+	}
 
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second): // Timeout
-		t.Error("Expected call to be done, but it timed out")
-	case err := <-errCh:
-		t.Errorf("Failed handling request: %v", err)
+	testCases := genGoTestCases()
+
+	for name, data := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r, w := io.Pipe()
+
+			written := make(chan struct{})
+
+			conn := &rwc{
+				Reader: r,
+				Writer: &signalWriter{n: n - 1, done: written},
+			}
+
+			errCh := make(chan error, 1)
+
+			c := jrpc.NewClient(conn)
+			go c.Input(context.Background(), errCh)
+
+			done := make(chan struct{})
+
+			var wg sync.WaitGroup
+
+			wg.Add(n)
+
+			for range n {
+				go func() {
+					callData := jrpc.Call("foo").Args(data[paramsKey])
+
+					if data[genKey] != nil {
+						callData.GenID(data[genKey].(jrpc.Generator))
+					}
+
+					var doneCh chan *jrpc.CallState
+
+					if data[doneKey] != nil {
+						doneCh = data[doneKey].(chan *jrpc.CallState)
+					}
+
+					<-c.Go(doneCh, callData).Done
+
+					wg.Done()
+				}()
+			}
+
+			<-written
+
+			go func() {
+				for i := range n {
+					_, err := w.Write(responses[i])
+					if err != nil {
+						errCh <- err
+					}
+				}
+			}()
+
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(1 * time.Second): // Timeout
+				t.Error("Expected call to be done, but it timed out")
+			case err := <-errCh:
+				t.Errorf("Failed handling request: %v", err)
+			}
+		})
 	}
 }
 
@@ -424,7 +772,7 @@ func TestClient_CallShouldReturnError(t *testing.T) {
 		}
 
 		if !errors.Is(call.Error, jrpc.ErrInternalError) {
-			t.Fatalf("Expected internal error, got %v", call.Result[0].Error)
+			t.Fatalf("Expected internal error, got %v", call.Error)
 		}
 	}
 }
