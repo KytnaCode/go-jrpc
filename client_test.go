@@ -1237,11 +1237,18 @@ func TestClient_GoBatchShouldReturnResult(t *testing.T) {
 		{JSONRPC: jrpc.JSONRPCVersion, ID: getID(2), Result: results[2]},
 	}
 
+	b, err := json.Marshal(responses)
+	if err != nil {
+		t.Fatalf("Failed to marshal responses: %v", err)
+	}
+
 	r, w := io.Pipe()
+
+	written := make(chan struct{})
 
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -1263,14 +1270,13 @@ func TestClient_GoBatchShouldReturnResult(t *testing.T) {
 		id3,
 	}
 
-	b, err := json.Marshal(responses)
-	if err != nil {
-		t.Fatalf("Failed to marshal responses: %v", err)
-	}
+	go func() {
+		<-written
 
-	if _, err := w.Write(b); err != nil {
-		t.Fatalf("Failed to write to pipe: %v", err)
-	}
+		if _, err := w.Write(b); err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
+		}
+	}()
 
 	select {
 	case <-call.Done:
@@ -1327,9 +1333,11 @@ func TestClient_GoBatchShouldReturnError(t *testing.T) {
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -1342,9 +1350,13 @@ func TestClient_GoBatchShouldReturnError(t *testing.T) {
 		jrpc.Call("baz").Args("qux"),
 	)
 
-	if _, err := w.Write(b); err != nil {
-		t.Fatalf("Failed to write to pipe: %v", err)
-	}
+	go func() {
+		<-written
+
+		if _, err := w.Write(b); err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
+		}
+	}()
 
 	select {
 	case <-call.Done:
@@ -1377,9 +1389,11 @@ func TestClient_GoBatchShouldNotReturnAnResponseToANotification(t *testing.T) {
 
 	r, w := io.Pipe()
 
+	written := make(chan struct{})
+
 	conn := &rwc{
 		Reader: r,
-		Writer: io.Discard,
+		Writer: &signalWriter{done: written},
 	}
 
 	errCh := make(chan error, 1)
@@ -1392,9 +1406,13 @@ func TestClient_GoBatchShouldNotReturnAnResponseToANotification(t *testing.T) {
 		jrpc.Call("baz").Args("qux"),          // non-notification
 	)
 
-	if _, err := w.Write([]byte(`[{ "jsonrpc":"2.0", "id":0, "result": 4.0}]` + "\n")); err != nil {
-		t.Fatalf("Failed to write to pipe: %v", err)
-	}
+	go func() {
+		<-written
+
+		if _, err := w.Write([]byte(`[{ "jsonrpc":"2.0", "id":0, "result": 4.0}]` + "\n")); err != nil {
+			t.Errorf("Failed to write to pipe: %v", err)
+		}
+	}()
 
 	select {
 	case <-call.Done:
@@ -1508,10 +1526,8 @@ func TestClient_GoBatchShouldBeSafeForConcurrentUse(t *testing.T) {
 func TestClient_InputShouldNotPanicWithANillErrorChannel(t *testing.T) {
 	t.Parallel()
 
-	request := `{"jsonrpc":"2.0", "id":0, "error": {"code": -32603, "message": "internal error"}}` + "\n"
-
 	conn := &rwc{
-		Reader: strings.NewReader(request),
+		Reader: &test.NoOpReader{},
 		Writer: io.Discard,
 	}
 
@@ -1530,10 +1546,8 @@ func TestClient_InputShouldNotPanicWithANillErrorChannel(t *testing.T) {
 func TestClient_InputShouldCloseConn(t *testing.T) {
 	t.Parallel()
 
-	request := `{"jsonrpc":"2.0", "id":0, "error": {"code": -32603, "message": "internal error"}}` + "\n"
-
 	conn := &rwc{
-		Reader: strings.NewReader(request),
+		Reader: &test.NoOpReader{},
 		Writer: io.Discard,
 	}
 
