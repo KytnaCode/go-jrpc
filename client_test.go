@@ -377,59 +377,6 @@ func TestClient_GoShouldReturnAnErrorOnClosedClient(t *testing.T) {
 	}
 }
 
-func TestClient_GoShouldReturnAnErrorOnArleadyClosedClient(t *testing.T) {
-	t.Parallel()
-
-	testCases := genGoTestCases()
-
-	for name, data := range testCases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			conn := &rwc{
-				Reader: &test.NoOpReader{},
-				Writer: io.Discard,
-			}
-
-			errCh := make(chan error, 1)
-
-			c := jrpc.NewClient(conn)
-			go c.Input(context.Background(), errCh)
-
-			var doneCh chan *jrpc.CallState
-
-			if data[doneKey] != nil {
-				doneCh = data[doneKey].(chan *jrpc.CallState)
-			}
-
-			callData := jrpc.Call("foo").Args(data[paramsKey])
-
-			if data[genKey] != nil {
-				callData.GenID(data[genKey].(jrpc.Generator))
-			}
-
-			if err := c.Close(); err != nil {
-				t.Fatalf("Failed to close client: %v", err)
-			}
-
-			call := c.Go(doneCh, callData)
-
-			select {
-			case <-call.Done:
-				if call.Error == nil {
-					t.Fatal("Expected call to return an error")
-				}
-
-				if !errors.Is(call.Error, jrpc.ErrClientShutdown) {
-					t.Fatalf("Expected client shutdown error, got %v", call.Error)
-				}
-			case <-time.After(1 * time.Second): // Timeout
-				t.Error("Expected call to be done, but it timed out")
-			}
-		})
-	}
-}
-
 func TestClient_GoShouldReturnAnErrorOnClosedConnection(t *testing.T) {
 	t.Parallel()
 
