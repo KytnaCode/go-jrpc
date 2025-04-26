@@ -99,8 +99,8 @@ func WithLogger(logger func(string, ...any)) func(*Server) {
 	}
 }
 
-// Register registers a method with the given name and handler. If the default [MethodRegister] is used, the handler must
-// meet the criteria defined on [Registry]. Different registries may have different criteria.
+// Register registers a method with the given name and handler. If the default [MethodRegister] is used, the handler
+// must meet the criteria defined on [Registry]. Different registries may have different criteria.
 //
 // Implements the [Register] interface.
 // Is safe for concurrent use.
