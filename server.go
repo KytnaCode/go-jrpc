@@ -128,17 +128,38 @@ func (s *Server) Accept(ctx context.Context, lis net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	wg := new(sync.WaitGroup)
+
+	go func() {
+		<-ctx.Done()
+
+		if err := lis.Close(); err != nil {
+			s.errorLog("failed to close listener: %v", err)
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("accepting connections cancelled: %w", ctx.Err())
+			wg.Wait()
+
+			return nil
 		default:
 			conn, err := lis.Accept()
 			if err != nil {
+				if errors.Is(err, net.ErrClosed) {
+					return nil // Listener closed.
+				}
+
 				return fmt.Errorf("failed to accept connection: %w", err)
 			}
 
-			go s.ServeConn(ctx, conn)
+			wg.Add(1)
+
+			go func(ctx context.Context) {
+				defer wg.Done()
+				s.ServeConn(ctx, conn)
+			}(ctx)
 		}
 	}
 }
@@ -159,10 +180,24 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var closeOnce sync.Once
+
 	defer func() {
-		if err := conn.Close(); err != nil {
-			s.errorLog("failed to close connection: %v", err)
-		}
+		closeOnce.Do(func() {
+			if err := conn.Close(); err != nil {
+				s.errorLog("failed to close connection: %v", err)
+			}
+		})
+	}()
+
+	go func() {
+		<-ctx.Done()
+
+		closeOnce.Do(func() {
+			if err := conn.Close(); err != nil {
+				s.errorLog("failed to close connection: %v", err)
+			}
+		})
 	}()
 
 	dec := json.NewDecoder(conn)
@@ -175,9 +210,7 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 		default:
 			var msg json.RawMessage // Raw JSON-RPC message.
 
-			if err := dec.Decode(&msg); err == io.EOF { // Connection closed.
-				return
-			} else if err != nil { // Decode error.
+			if err := dec.Decode(&msg); err != nil { // Connection closed.
 				s.errorLog("failed to decode message: %v", err)
 
 				continue
@@ -188,6 +221,8 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 				if err := enc.Encode(parseError(err)); err != nil {
 					s.errorLog("failed to encode parse error: %v", err)
 				}
+
+				continue
 			}
 
 			// If no responses, don't write anything at all.
