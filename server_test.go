@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/kytnacode/go-jrpc"
@@ -52,14 +53,38 @@ func newIOReadWriteCloser(r io.Reader, w io.Writer) *ioReadWriteCloser {
 
 type listener struct {
 	net.Listener
+
+	n        atomic.Uint64
+	closedch chan struct{}
+}
+
+func newListener() *listener {
+	return &listener{
+		closedch: make(chan struct{}),
+	}
 }
 
 // Accept waits for and returns the next connection to the listener.
 func (listener *listener) Accept() (net.Conn, error) {
-	const request = `{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`
-	r := strings.NewReader(request)
+	if _, ok := <-listener.closedch; !ok {
+		return nil, net.ErrClosed
+	}
+
+	if listener.n.Load() > 2 {
+		<-listener.closedch
+	}
+
+	listener.n.Add(1)
+
+	r := strings.NewReader(`{"jsonrpc": "2.0", "method": "foo", "params": [ "bar" ], "id": 1}`)
 
 	return newIOReadWriteCloser(r, io.Discard), nil
+}
+
+func (listener *listener) Close() error {
+	close(listener.closedch)
+
+	return nil
 }
 
 func TestServer_ServeConnInvalidJSON(t *testing.T) {
@@ -686,7 +711,7 @@ func TestServer_AcceptShouldBeSafeForConcurrentUse(t *testing.T) {
 
 	for range n {
 		go func() {
-			l := &listener{}
+			l := newListener()
 
 			s := jrpc.NewServer()
 
@@ -734,7 +759,7 @@ func TestServerShouldServeOverHTTPAndConnectionAndListenerConcurrently(t *testin
 
 	for range n {
 		go func() {
-			l := &listener{}
+			l := newListener()
 
 			s := jrpc.NewServer()
 
