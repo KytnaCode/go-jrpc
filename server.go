@@ -159,7 +159,11 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.errorLog("failed to close connection: %v", err)
+		}
+	}()
 
 	dec := json.NewDecoder(conn)
 	enc := json.NewEncoder(conn)
