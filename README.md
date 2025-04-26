@@ -3,6 +3,7 @@
 go-jrpc is a library to make  JSON-RPC 2.0 clients and build servers in Go.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/kytnacode/go-jrpc.svg)](https://pkg.go.dev/github.com/kytnacode/go-jrpc) 
+[![Go Report Card](https://goreportcard.com/badge/github.com/kytnacode/go-jrpc)](https://goreportcard.com/report/github.com/kytnacode/go-jrpc)
 
 ## Overview
 
