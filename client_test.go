@@ -426,15 +426,6 @@ func TestClient_GoShouldReturnAnErrorOnArleadyClosedClient(t *testing.T) {
 			case <-time.After(1 * time.Second): // Timeout
 				t.Error("Expected call to be done, but it timed out")
 			}
-
-			select {
-			case err := <-errCh:
-				if err == nil {
-					t.Fatal("Expected call to return an error")
-				}
-			case <-time.After(1 * time.Second): // Timeout
-				t.Error("Expected call to be done, but it timed out")
-			}
 		})
 	}
 }
@@ -487,15 +478,6 @@ func TestClient_GoShouldReturnAnErrorOnClosedConnection(t *testing.T) {
 				}
 			case <-time.After(1 * time.Second): // Timeout
 				t.Error("Expected call to be done, but it timed out")
-			}
-
-			select {
-			case <-time.After(1 * time.Second): // Timeout
-				t.Error("Expected errCh to return an error, but it timed out")
-			case err := <-errCh:
-				if err == nil {
-					t.Fatal("Expected call to return an error")
-				}
 			}
 		})
 	}

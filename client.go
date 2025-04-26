@@ -398,194 +398,185 @@ func (c *Client) Input(ctx context.Context, errCh chan error) {
 
 	var m msg
 
-	var err error
-
 	go func() {
 		<-ctx.Done()
 
 		if err := c.Close(); err != nil {
 			sendErr(fmt.Errorf("failed to close client: %w", err))
 		} else {
-			sendErr(fmt.Errorf("context cancelled: %w", ctx.Err()))
+			sendErr(fmt.Errorf("%w: %w", ErrClientShutdown, ctx.Err()))
 		}
 	}()
 
-	for err == nil {
-		select {
-		case <-ctx.Done():
-			err = fmt.Errorf("context cancelled: %w", ctx.Err())
-		default:
-			if err = c.dec.Decode(&m); err != nil {
-				sendErr(fmt.Errorf("failed to decode message: %w", err))
+	for !c.Closed() {
+		if err := c.dec.Decode(&m); err != nil {
+			break
+		}
 
-				continue
-			}
+		if len(m.res) == 0 {
+			sendErr(fmt.Errorf("empty JSON-RPC message: %w", ErrEmptyResponse))
 
-			if len(m.res) == 0 {
-				sendErr(fmt.Errorf("empty JSON-RPC message: %w", ErrEmptyResponse))
+			continue
+		}
 
-				continue
-			}
+		if !m.batch && m.res[0].ID == nil {
+			sendErr(ErrNullID)
 
-			if !m.batch && m.res[0].ID == nil {
-				sendErr(ErrNullID)
+			continue
+		}
 
-				continue
-			}
+		if m.batch {
+			var missing bool
 
-			if m.batch {
-				var missing bool
+			var batchID *uint64
 
-				var batchID *uint64
-
-				// Check if an ID is missing in the batch response.
-				nullIDCount := 0
-
-				for _, res := range m.res {
-					if res.ID == nil {
-						nullIDCount++
-						missing = true
-
-						continue
-					}
-
-					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
-					if err != nil {
-						sendErr(fmt.Errorf("failed to parse ID: %w", err))
-
-						missing = true
-					}
-
-					batchID = &id // If at least one ID is present, we can use it to find the call and resolve it.
-				}
-
-				if nullIDCount > 0 {
-					sendErr(
-						fmt.Errorf(
-							"batch response contains %d null IDs: %w",
-							nullIDCount,
-							ErrNullID,
-						),
-					)
-				}
-
-				// If at least one ID is present, resolve the call.
-				if missing && batchID != nil {
-					c.pendingMu.Lock()
-
-					call, ok := c.pending[*batchID]
-					if !ok {
-						c.pendingMu.Unlock()
-
-						continue
-					}
-
-					call.Error = fmt.Errorf(
-						"response contain null IDs, some requests may be invalid: %w",
-						ErrNullID,
-					)
-					call.Done <- call
-
-					for id := range call.ids {
-						delete(c.pending, id)
-					}
-
-					c.pendingMu.Unlock()
-				}
-
-				if missing {
-					sendErr(resToError(m.res[0]))
-
-					continue
-				}
-			}
-
-			id, err := strconv.ParseUint(m.res[0].ID.String(), 10, 64)
-			if err != nil {
-				sendErr(fmt.Errorf("failed to parse ID: %w", err))
-
-				continue
-			}
-
-			c.pendingMu.Lock()
-
-			call, ok := c.pending[id]
-			if ok {
-				// Batch calls are mapped to the same call, so we need to remove all of them from the pending map.
-				for _, res := range m.res {
-					id, err := strconv.ParseUint(res.ID.String(), 10, 64)
-					if err != nil {
-						call.Done <- call
-
-						sendErr(fmt.Errorf("failed to parse ID: %w", err))
-						c.pendingMu.Unlock()
-
-						continue
-					}
-
-					delete(c.pending, id)
-				}
-			} else {
-				sendErr(fmt.Errorf("failed to find call with ID %d: %w", id, ErrUnmatchedCall))
-				c.pendingMu.Unlock()
-
-				continue
-			}
-
-			c.pendingMu.Unlock()
-
-			results := make(map[uint64]CallResult, len(m.res))
-
-			if !m.batch && m.res[0].Error != nil {
-				call.Error = resToError(m.res[0])
-				call.Result = results
-				call.Done <- call
-
-				continue
-			}
-
-			var batchErr bool
+			// Check if an ID is missing in the batch response.
+			nullIDCount := 0
 
 			for _, res := range m.res {
-				var id uint64
-
-				if m.batch {
-					id, err = strconv.ParseUint(res.ID.String(), 10, 64)
-					if err != nil {
-						sendErr(fmt.Errorf("failed to parse ID: %w", err))
-
-						batchErr = true
-						results[id] = CallResult{
-							Error: fmt.Errorf("failed to parse ID: %w", ErrParse),
-						}
-
-						continue
-					}
-				} else {
-					id = 0
-				}
-
-				if res.Error != nil {
-					batchErr = true
-					results[id] = CallResult{
-						Error: resToError(res),
-					}
+				if res.ID == nil {
+					nullIDCount++
+					missing = true
 
 					continue
 				}
 
-				results[id] = CallResult{
-					Result: res.Result,
+				id, err := strconv.ParseUint(res.ID.String(), 10, 64)
+				if err != nil {
+					sendErr(fmt.Errorf("failed to parse ID: %w", err))
+
+					missing = true
 				}
+
+				batchID = &id // If at least one ID is present, we can use it to find the call and resolve it.
 			}
 
-			if batchErr {
-				call.Error = fmt.Errorf("error in batch response: %w", ErrBatch)
+			if nullIDCount > 0 {
+				sendErr(
+					fmt.Errorf(
+						"batch response contains %d null IDs: %w",
+						nullIDCount,
+						ErrNullID,
+					),
+				)
 			}
 
+			// If at least one ID is present, resolve the call.
+			if missing && batchID != nil {
+				c.pendingMu.Lock()
+
+				call, ok := c.pending[*batchID]
+				if !ok {
+					c.pendingMu.Unlock()
+
+					continue
+				}
+
+				call.Error = fmt.Errorf(
+					"response contain null IDs, some requests may be invalid: %w",
+					ErrNullID,
+				)
+				call.Done <- call
+
+				for id := range call.ids {
+					delete(c.pending, id)
+				}
+
+				c.pendingMu.Unlock()
+			}
+
+			if missing {
+				sendErr(resToError(m.res[0]))
+
+				continue
+			}
+		}
+
+		id, err := strconv.ParseUint(m.res[0].ID.String(), 10, 64)
+		if err != nil {
+			sendErr(fmt.Errorf("failed to parse ID: %w", err))
+
+			continue
+		}
+
+		c.pendingMu.Lock()
+
+		call, ok := c.pending[id]
+		if ok {
+			// Batch calls are mapped to the same call, so we need to remove all of them from the pending map.
+			for _, res := range m.res {
+				id, err := strconv.ParseUint(res.ID.String(), 10, 64)
+				if err != nil {
+					call.Done <- call
+
+					sendErr(fmt.Errorf("failed to parse ID: %w", err))
+					c.pendingMu.Unlock()
+
+					break
+				}
+
+				delete(c.pending, id)
+			}
+		} else {
+			sendErr(fmt.Errorf("failed to find call with ID %d: %w", id, ErrUnmatchedCall))
+			c.pendingMu.Unlock()
+
+			continue
+		}
+
+		c.pendingMu.Unlock()
+
+		results := make(map[uint64]CallResult, len(m.res))
+
+		if !m.batch && m.res[0].Error != nil {
+			call.Error = resToError(m.res[0])
 			call.Result = results
 			call.Done <- call
+
+			continue
 		}
+
+		var batchErr bool
+
+		for _, res := range m.res {
+			var id uint64
+
+			if m.batch {
+				id, err = strconv.ParseUint(res.ID.String(), 10, 64)
+				if err != nil {
+					sendErr(fmt.Errorf("failed to parse ID: %w", err))
+
+					batchErr = true
+					results[id] = CallResult{
+						Error: fmt.Errorf("failed to parse ID: %w", ErrParse),
+					}
+
+					break
+				}
+			} else {
+				id = 0
+			}
+
+			if res.Error != nil {
+				batchErr = true
+				results[id] = CallResult{
+					Error: resToError(res),
+				}
+
+				continue
+			}
+
+			results[id] = CallResult{
+				Result: res.Result,
+			}
+		}
+
+		if batchErr {
+			call.Error = fmt.Errorf("error in batch response: %w", ErrBatch)
+		}
+
+		call.Result = results
+		call.Done <- call
 	}
 
 	// Close the connection and mark all pending calls as done.
